@@ -65,6 +65,7 @@ class UUSIVCSegDataset(Dataset):
                     reduce_zero_label=self.reduce_zero_label,
                     seg_fields=[],
                     # test_mode=test_mode,
+                    organ=organ
                 )
                 data_list.append(data_info)
         return data_list

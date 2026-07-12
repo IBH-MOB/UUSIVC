@@ -2,6 +2,7 @@
 dataset_type = 'UUSIVCSegDataset'
 # data_root = '/scratch/dr/m.badran/UUSIC/dataset-challenge/Extracted/TRAIN/Challenge_Data_Public/image_seg'
 data_root = '/scratch/dr/m.badran/UUSIC/dataset-challenge/Extracted/TRAIN/Challenge_Data_Private_v2_fully_anonymized/Train/image_seg'
+# data_root='/scratch/dr/m.badran/UUSIC/dataset-challenge-sample'
 
 crop_size = (512, 1024)
 train_pipeline = [
@@ -16,7 +17,8 @@ train_pipeline = [
     dict(type='Resize', scale=(512), keep_ratio=False),
     dict(type='RandomFlip', prob=0.5),
     dict(type='PhotoMetricDistortion'),
-    dict(type='PackSegInputs')
+    dict(type='PackSegInputs',
+        meta_keys=('organ', 'img_path', 'seg_map_path', 'ori_shape', 'img_shape', 'pad_shape', 'scale_factor', 'flip', 'flip_direction', 'reduce_zero_label'))
 ]
 test_pipeline = [
     dict(type='LoadImageFromFile'),
@@ -25,7 +27,8 @@ test_pipeline = [
     # add loading annotation after ``Resize`` because ground truth
     # does not need to do resize data transform
     dict(type='LoadAnnotations'),
-    dict(type='PackSegInputs')
+    dict(type='PackSegInputs',
+        meta_keys=('organ', 'img_path', 'seg_map_path', 'ori_shape', 'img_shape', 'pad_shape', 'scale_factor', 'flip', 'flip_direction', 'reduce_zero_label'))
 ]
 img_ratios = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75]
 tta_pipeline = [
@@ -73,5 +76,5 @@ val_dataloader = dict(
         label_map=dict({255: 1})))
 test_dataloader = val_dataloader
 
-val_evaluator = dict(type='IoUMetric', iou_metrics=['mIoU'])
+val_evaluator = dict(type='OrgansIoUMetric', iou_metrics=['mIoU', 'mDice', 'mFscore'])
 test_evaluator = val_evaluator

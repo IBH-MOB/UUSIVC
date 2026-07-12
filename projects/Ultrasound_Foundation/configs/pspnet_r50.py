@@ -4,10 +4,11 @@ _base_ = [
     '../../../configs/_base_/default_runtime.py',
     '../../../configs/_base_/schedules/schedule_20k.py'
 ]
-work_dir = '/scratch/dr/m.badran/UUSIC/mmseg/work_dirs/uusivc_exp2'  
+work_dir = '/scratch/dr/m.badran/UUSIC/mmseg/work_dirs/uusivc_exp3'  
 
 custom_imports = dict(
-    imports=['projects.Ultrasound_Foundation.mmseg.datasets.uusivc'])
+    imports=['projects.Ultrasound_Foundation.mmseg.datasets.uusivc',
+             'projects.Ultrasound_Foundation.mmseg.evaluation.organs_metric'],)
 # crop_size = (512, 1024)
 crop_size = (512, 512)
 data_preprocessor = dict(size=crop_size)
@@ -15,10 +16,9 @@ model = dict(data_preprocessor=data_preprocessor, # data preprocessor of pspnet 
              decode_head=dict(num_classes=2)) 
 
 train_cfg = dict(type='IterBasedTrainLoop', max_iters=20000, val_interval=2000)
-# train_cfg = dict(type='IterBasedTrainLoop', max_iters=20000, val_interval=4)# for debugging validation
 train_dataloader = dict(batch_size=4, num_workers=4)
 
-
+train_cfg = dict(type='IterBasedTrainLoop', max_iters=20000, val_interval=4)# for debugging validation
 
 visualizer = dict(
     type='SegLocalVisualizer',
