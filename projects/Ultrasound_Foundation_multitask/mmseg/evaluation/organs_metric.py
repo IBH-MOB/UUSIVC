@@ -69,6 +69,7 @@ class OrgansIoUMetric(BaseMetric):
             mkdir_or_exist(self.output_dir)
         self.format_only = format_only
         self.results = dict()
+        self.results_cls = dict()
 
     def process(self, data_batch: dict, data_samples: Sequence[dict]) -> None:
         """Process one batch of data and data_samples.
@@ -84,28 +85,39 @@ class OrgansIoUMetric(BaseMetric):
         for data_sample in data_samples:
             pred_label = data_sample['pred_sem_seg']['data'].squeeze()
             # format_only always for test dataset without ground truth
-            if not self.format_only:
-                label = data_sample['gt_sem_seg']['data'].squeeze().to(
-                    pred_label)
-                if data_sample['organ'] not in self.results:
-                    self.results[data_sample['organ']] = []
-                self.results[data_sample['organ']].append(
-                    self.intersect_and_union(pred_label, label, num_classes,
-                                             self.ignore_index))
-            # format_result
-            if self.output_dir is not None:
-                basename = osp.splitext(osp.basename(
-                    data_sample['img_path']))[0]
-                png_filename = osp.abspath(
-                    osp.join(self.output_dir, f'{basename}.png'))
-                output_mask = pred_label.cpu().numpy()
-                # The index range of official ADE20k dataset is from 0 to 150.
-                # But the index range of output is from 0 to 149.
-                # That is because we set reduce_zero_label=True.
-                if data_sample.get('reduce_zero_label', False):
-                    output_mask = output_mask + 1
-                output = Image.fromarray(output_mask.astype(np.uint8))
-                output.save(png_filename)
+            pred_cls = data_sample['cls_logits']
+            gt_cls = data_sample['class_label']
+
+            if data_sample['organ'] not in self.results:
+                self.results[data_sample['organ']] = []
+            if data_sample['organ'] not in self.results_cls:
+                self.results_cls[data_sample['organ']] = []
+
+            if gt_cls != 2:
+                self.results_cls[data_sample['organ']].append((pred_cls > 0.5) == gt_cls)
+            
+            if pred_label.shape == data_sample['gt_sem_seg']['data'].squeeze().shape: 
+                if not self.format_only:
+                    label = data_sample['gt_sem_seg']['data'].squeeze().to(
+                        pred_label)
+
+                    self.results[data_sample['organ']].append(
+                        self.intersect_and_union(pred_label, label, num_classes,
+                                                self.ignore_index))
+                # format_result
+                if self.output_dir is not None:
+                    basename = osp.splitext(osp.basename(
+                        data_sample['img_path']))[0]
+                    png_filename = osp.abspath(
+                        osp.join(self.output_dir, f'{basename}.png'))
+                    output_mask = pred_label.cpu().numpy()
+                    # The index range of official ADE20k dataset is from 0 to 150.
+                    # But the index range of output is from 0 to 149.
+                    # That is because we set reduce_zero_label=True.
+                    if data_sample.get('reduce_zero_label', False):
+                        output_mask = output_mask + 1
+                    output = Image.fromarray(output_mask.astype(np.uint8))
+                    output.save(png_filename)
 
     def compute_metrics(self, results: list) -> Dict[str, float]:
         """Compute the metrics from processed results.
@@ -311,6 +323,16 @@ class OrgansIoUMetric(BaseMetric):
             names of the metrics, and the values are corresponding results.
         """
         metrics = None
+        overall_list = []
+        for organ in self.results.keys():
+            if len(self.results[organ]) != 0:
+                overall_list = overall_list + self.results[organ]
+        self.results['Overall_US'] = overall_list
+        overall_list = []
+        for organ in self.results_cls.keys():
+            if len(self.results_cls[organ]) != 0:
+                overall_list = overall_list + self.results_cls[organ]
+        self.results_cls['Overall_US'] = overall_list
         for organ in self.results.keys():
             if len(self.results[organ]) == 0:
                 print_log(
@@ -326,14 +348,27 @@ class OrgansIoUMetric(BaseMetric):
                     size,
                     self.collect_device,
                     tmpdir=self.collect_dir)
+                results_cls = collect_results(
+                    self.results_cls[organ],
+                    size,
+                    self.collect_device,
+                    tmpdir=self.collect_dir)
             else:
                 results = collect_results(self.results[organ], size, self.collect_device)
+                results_cls = collect_results(self.results_cls[organ], size, self.collect_device)
+                
 
             if is_main_process():
                 # cast all tensors in results list to cpu
-                results = _to_cpu(results)
-                _metrics = self.compute_metrics(results)  # type: ignore
-                # Add prefix to metric names
+                _metrics = dict()
+                if len(results) > 0:
+                    results = _to_cpu(results)
+                    _metrics = self.compute_metrics(results)  # type: ignore
+                    # Add prefix to metric names
+                if len(results_cls) > 0:
+                    results_cls = _to_cpu(results_cls)
+                    _metrics.update({"acc_cls": sum(results_cls)/len(results_cls)})
+
                 if self.prefix:
                     _metrics = {
                         '/'.join((self.prefix, k)): v
@@ -349,8 +384,10 @@ class OrgansIoUMetric(BaseMetric):
                     metrics[0].update(_metrics)
             else:
                 metrics = [None]  # type: ignore
+
             # reset the results list
             self.results[organ].clear()
+            
         
         broadcast_object_list(metrics)
 
