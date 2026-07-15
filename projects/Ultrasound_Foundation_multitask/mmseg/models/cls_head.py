@@ -167,7 +167,7 @@ class CLSHead(BaseDecodeHead):
         cls_weight = None
 
         if (cls_label == 2).all():
-            print("All elements are equal to 2")
+            # print("All elements are equal to 2")
             return {"loss_ce": torch.tensor(0.0, device='cuda:0'), "acc_cls": torch.tensor(0.0, device='cuda:0')}
 
         if not isinstance(self.loss_decode, nn.ModuleList):
