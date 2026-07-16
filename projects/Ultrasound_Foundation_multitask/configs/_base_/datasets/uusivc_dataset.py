@@ -1,5 +1,5 @@
 # dataset settings
-dataset_type = 'UUSIVCClsDataset'
+dataset_type = 'UUSIVCSEGClsDataset'
 # data_root = '/scratch/dr/m.badran/UUSIC/dataset-challenge/Extracted/TRAIN/Challenge_Data_Public/image_cls'
 data_root_train = '/scratch/dr/UUSIVC26/mmseg_format/train'
 data_root_val = '/scratch/dr/UUSIVC26/mmseg_format/val'
