@@ -14,7 +14,7 @@ from mmseg.models.segmentors.base import BaseSegmentor
 from mmengine.structures import PixelData
 from mmseg.models.utils import resize
 from mmseg.structures import SegDataSample
-
+import torch
 
 @MODELS.register_module()
 class MultitaskEncoderDecoder(BaseSegmentor):
@@ -147,19 +147,22 @@ class MultitaskEncoderDecoder(BaseSegmentor):
 
         return seg_logits, cls_logits
 
-    def _decode_head_forward_train(self, inputs: List[Tensor],
-                                   data_samples: SampleList) -> dict:
+    # def _decode_head_forward_train(self, inputs: List[Tensor],
+                                #    data_samples: SampleList) -> dict:
+    def _decode_head_forward_train(self, inputs: List,
+                                   data_samples: List) -> dict:
         """Run forward function and calculate loss for decode head in
         training."""
         losses = dict()
-        loss_decode = self.decode_head.loss(inputs, data_samples,
-                                            self.train_cfg)
-        
-        loss_decode_cls = self.decode_cls_head.loss(inputs, data_samples,
-                                            self.train_cfg)
 
-        losses.update(add_prefix(loss_decode, 'decode'))
-        losses.update(add_prefix(loss_decode_cls, 'decode_cls'))
+        if len(inputs[0]):
+            loss_decode = self.decode_head.loss(inputs[0], data_samples[0],
+                                            self.train_cfg)
+            losses.update(add_prefix(loss_decode, 'decode'))
+        if len(inputs[1]):
+            loss_decode_cls = self.decode_cls_head.loss(inputs[1], data_samples[1],
+                                            self.train_cfg)
+            losses.update(add_prefix(loss_decode_cls, 'decode_cls'))
         return losses
 
     def _auxiliary_head_forward_train(self, inputs: List[Tensor],
@@ -194,12 +197,39 @@ class MultitaskEncoderDecoder(BaseSegmentor):
         x = self.extract_feat(inputs)
 
         losses = dict()
+        
+        x_cls_idx = []
+        x_seg_idx = []
+        x_cls = []
+        x_seg = []
+        data_samples_seg = []
+        data_samples_cls = []
 
-        loss_decode = self._decode_head_forward_train(x, data_samples)
+        for i in range(len(data_samples)):
+            if not (data_samples[i].gt_sem_seg.data==1).all():
+                x_seg_idx.append(i)
+                data_samples_seg.append(data_samples[i])
+            if not data_samples[i].class_label == 2:
+                x_cls_idx.append(i)
+                data_samples_cls.append(data_samples[i])
+        
+        for i in range(len(x)):
+            x_seg.append(x[i][x_seg_idx])
+        for i in range(len(x)):
+            x_cls.append(x[i][x_cls_idx])
+
+        if len(x_seg_idx) < 2:
+            x_seg = []
+            data_samples_seg = []
+        if len(x_cls_idx) < 1:
+            x_cls = []
+            data_samples_cls = []
+        loss_decode = self._decode_head_forward_train([x_seg,x_cls], [data_samples_seg,data_samples_cls])
         losses.update(loss_decode)
-
-        if self.with_auxiliary_head:
-            loss_aux = self._auxiliary_head_forward_train(x, data_samples)
+        
+        # if self.with_auxiliary_head:
+        if self.with_auxiliary_head and len(x_seg) > 0:
+            loss_aux = self._auxiliary_head_forward_train(x_seg, data_samples_seg)
             losses.update(loss_aux)
 
         return losses

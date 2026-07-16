@@ -51,8 +51,8 @@ class UUSIVCClsDataset(Dataset):
         for organ in self.organs:
             # if not "cls" in organ:
             #     continue
-            if organ == "Prostate":
-                continue
+            # if organ == "Prostate":
+            #     continue
 
             folder = os.path.join(data_root, organ)
             for i in ["0","1","2"]:
@@ -64,7 +64,7 @@ class UUSIVCClsDataset(Dataset):
                     # seg_map_path = img_path
                     seg_map_path = os.path.join(folder, 'mask', img)
                     if not os.path.exists(seg_map_path):
-                        seg_map_path = "/scratch/dr/m.badran/UUSIC/dataset-challenge/Extracted/TRAIN/Challenge_Data_Private_v2_fully_anonymized/Train/image_seg/Breast_luminal/masks/HER2_0_0.png"
+                        seg_map_path = "/scratch/dr/m.badran/UUSIC/grayscale_10x10.png"
 
                     data_info = dict(
                         img_path=img_path,
