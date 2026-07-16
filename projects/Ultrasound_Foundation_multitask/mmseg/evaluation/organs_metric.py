@@ -19,6 +19,9 @@ import logging
 from torch import Tensor
 from mmengine.structures import BaseDataElement
 
+from sklearn.metrics import roc_auc_score
+from skimage.segmentation import find_boundaries
+from scipy.ndimage import distance_transform_edt
 
 @METRICS.register_module()
 class OrgansIoUMetric(BaseMetric):
@@ -68,8 +71,10 @@ class OrgansIoUMetric(BaseMetric):
         if self.output_dir and is_main_process():
             mkdir_or_exist(self.output_dir)
         self.format_only = format_only
-        self.results = dict()
-        self.results_cls = dict()
+        self.results_seg_iou = dict()
+        self.results_seg_nsd = dict()
+        self.results_cls_acc = dict()
+        self.results_cls_auc = dict()
 
     def process(self, data_batch: dict, data_samples: Sequence[dict]) -> None:
         """Process one batch of data and data_samples.
@@ -88,36 +93,46 @@ class OrgansIoUMetric(BaseMetric):
             pred_cls = data_sample['cls_logits']
             gt_cls = data_sample['class_label']
 
-            if data_sample['organ'] not in self.results:
-                self.results[data_sample['organ']] = []
-            if data_sample['organ'] not in self.results_cls:
-                self.results_cls[data_sample['organ']] = []
+            if data_sample['organ'] not in self.results_seg_iou:
+                self.results_seg_iou[data_sample['organ']] = []
+                self.results_seg_nsd[data_sample['organ']] = []
+            if data_sample['organ'] not in self.results_cls_acc:
+                self.results_cls_acc[data_sample['organ']] = []
+                self.results_cls_auc[data_sample['organ']] = []
 
             if gt_cls != 2:
-                self.results_cls[data_sample['organ']].append((pred_cls > 0.5) == gt_cls)
+                self.results_cls_acc[data_sample['organ']].append((pred_cls > 0.5) == gt_cls)
+                self.results_cls_auc[data_sample['organ']].append([gt_cls,pred_cls.cpu()[0].item()])
             
-            if pred_label.shape == data_sample['gt_sem_seg']['data'].squeeze().shape: 
-                if not self.format_only:
-                    label = data_sample['gt_sem_seg']['data'].squeeze().to(
-                        pred_label)
+            if (data_sample['gt_sem_seg']['data']==1).all():
+                if pred_label.shape == data_sample['gt_sem_seg']['data'].squeeze().shape: 
+                    print("ERROR Skipping IMG in VAL that should not be skipped")
+                # print("skipping")
+                continue ## dont eval for seg
+            if not self.format_only:
+                label = data_sample['gt_sem_seg']['data'].squeeze().to(
+                    pred_label)
 
-                    self.results[data_sample['organ']].append(
-                        self.intersect_and_union(pred_label, label, num_classes,
-                                                self.ignore_index))
-                # format_result
-                if self.output_dir is not None:
-                    basename = osp.splitext(osp.basename(
-                        data_sample['img_path']))[0]
-                    png_filename = osp.abspath(
-                        osp.join(self.output_dir, f'{basename}.png'))
-                    output_mask = pred_label.cpu().numpy()
-                    # The index range of official ADE20k dataset is from 0 to 150.
-                    # But the index range of output is from 0 to 149.
-                    # That is because we set reduce_zero_label=True.
-                    if data_sample.get('reduce_zero_label', False):
-                        output_mask = output_mask + 1
-                    output = Image.fromarray(output_mask.astype(np.uint8))
-                    output.save(png_filename)
+                self.results_seg_iou[data_sample['organ']].append(
+                    self.intersect_and_union(pred_label, label, num_classes,
+                                            self.ignore_index))
+                self.results_seg_nsd[data_sample['organ']].append(
+                    compute_nsd(label, pred_label))
+                
+            # format_result
+            if self.output_dir is not None:
+                basename = osp.splitext(osp.basename(
+                    data_sample['img_path']))[0]
+                png_filename = osp.abspath(
+                    osp.join(self.output_dir, f'{basename}.png'))
+                output_mask = pred_label.cpu().numpy()
+                # The index range of official ADE20k dataset is from 0 to 150.
+                # But the index range of output is from 0 to 149.
+                # That is because we set reduce_zero_label=True.
+                if data_sample.get('reduce_zero_label', False):
+                    output_mask = output_mask + 1
+                output = Image.fromarray(output_mask.astype(np.uint8))
+                output.save(png_filename)
 
     def compute_metrics(self, results: list) -> Dict[str, float]:
         """Compute the metrics from processed results.
@@ -158,13 +173,14 @@ class OrgansIoUMetric(BaseMetric):
         })
         metrics = dict()
         for key, val in ret_metrics_summary.items():
-            if key == 'aAcc':
-                metrics[key] = val
-            else:
-                metrics['m' + key] = val
+            # if key == 'aAcc':
+            #     metrics[key] = val
+            # else:
+            #     metrics['m' + key] = val
+            metrics[key] = val
 
         # each class table
-        ret_metrics.pop('aAcc', None)
+        ret_metrics.pop('SEG_aAcc', None)
         ret_metrics_class = OrderedDict({
             ret_metric: np.round(ret_metric_value * 100, 2)
             for ret_metric, ret_metric_value in ret_metrics.items()
@@ -271,28 +287,28 @@ class OrgansIoUMetric(BaseMetric):
             raise KeyError(f'metrics {metrics} is not supported')
 
         all_acc = total_area_intersect.sum() / total_area_label.sum()
-        ret_metrics = OrderedDict({'aAcc': all_acc})
+        ret_metrics = OrderedDict({'SEG_aAcc': all_acc})
         for metric in metrics:
             if metric == 'mIoU':
                 iou = total_area_intersect / total_area_union
                 acc = total_area_intersect / total_area_label
-                ret_metrics['IoU'] = iou
-                ret_metrics['Acc'] = acc
+                ret_metrics['SEG_mIoU'] = iou
+                ret_metrics['SEG_mAcc'] = acc
             elif metric == 'mDice':
                 dice = 2 * total_area_intersect / (
                     total_area_pred_label + total_area_label)
                 acc = total_area_intersect / total_area_label
-                ret_metrics['Dice'] = dice
-                ret_metrics['Acc'] = acc
+                ret_metrics['SEG_mDice'] = dice
+                ret_metrics['SEG_mAcc'] = acc
             elif metric == 'mFscore':
                 precision = total_area_intersect / total_area_pred_label
                 recall = total_area_intersect / total_area_label
                 f_value = torch.tensor([
                     f_score(x[0], x[1], beta) for x in zip(precision, recall)
                 ])
-                ret_metrics['Fscore'] = f_value
-                ret_metrics['Precision'] = precision
-                ret_metrics['Recall'] = recall
+                ret_metrics['SEG_mFscore'] = f_value
+                ret_metrics['SEG_mPrecision'] = precision
+                ret_metrics['SEG_mRecall'] = recall
 
         ret_metrics = {
             metric: value.numpy()
@@ -323,40 +339,57 @@ class OrgansIoUMetric(BaseMetric):
             names of the metrics, and the values are corresponding results.
         """
         metrics = None
-        overall_list = []
-        for organ in self.results.keys():
-            if len(self.results[organ]) != 0:
-                overall_list = overall_list + self.results[organ]
-        self.results['Overall_US'] = overall_list
-        overall_list = []
-        for organ in self.results_cls.keys():
-            if len(self.results_cls[organ]) != 0:
-                overall_list = overall_list + self.results_cls[organ]
-        self.results_cls['Overall_US'] = overall_list
-        for organ in self.results.keys():
-            if len(self.results[organ]) == 0:
+        overall_list_seg_iou = []
+        overall_list_seg_nsd = []
+        for organ in self.results_seg_iou.keys():
+            if len(self.results_seg_iou[organ]) != 0:
+                overall_list_seg_iou = overall_list_seg_iou + self.results_seg_iou[organ]
+                overall_list_seg_nsd = overall_list_seg_nsd + self.results_seg_nsd[organ]
+        self.results_seg_iou['Overall_US'] = overall_list_seg_iou
+        self.results_seg_nsd['Overall_US'] = overall_list_seg_nsd
+        overall_list_cls_acc = []
+        overall_list_cls_auc = []
+        for organ in self.results_cls_acc.keys():
+            if len(self.results_cls_acc[organ]) != 0:
+                overall_list_cls_acc = overall_list_cls_acc + self.results_cls_acc[organ]
+                overall_list_cls_auc = overall_list_cls_auc + self.results_cls_auc[organ]
+        self.results_cls_acc['Overall_US'] = overall_list_cls_acc
+        self.results_cls_auc['Overall_US'] = overall_list_cls_auc
+        for organ in self.results_seg_iou.keys():
+            if len(self.results_seg_iou[organ]) == 0:
                 print_log(
-                    f'{self.__class__.__name__} got empty `self.results`. Please '
+                    f'{self.__class__.__name__} got empty `self.results_seg_iou`. Please '
                     'ensure that the processed results are properly added into '
-                    '`self.results` in `process` method.',
+                    '`self.results_seg_iou` in `process` method.',
                     logger='current',
                     level=logging.WARNING)
 
             if self.collect_device == 'cpu':
                 results = collect_results(
-                    self.results[organ],
+                    self.results_seg_iou[organ],
                     size,
                     self.collect_device,
                     tmpdir=self.collect_dir)
-                results_cls = collect_results(
-                    self.results_cls[organ],
+                results_seg_nsd = collect_results(
+                    self.results_seg_nsd[organ],
+                    size,
+                    self.collect_device,
+                    tmpdir=self.collect_dir)
+                results_cls_acc = collect_results(
+                    self.results_cls_acc[organ],
+                    size,
+                    self.collect_device,
+                    tmpdir=self.collect_dir)
+                results_cls_auc = collect_results(
+                    self.results_cls_auc[organ],
                     size,
                     self.collect_device,
                     tmpdir=self.collect_dir)
             else:
-                results = collect_results(self.results[organ], size, self.collect_device)
-                results_cls = collect_results(self.results_cls[organ], size, self.collect_device)
-                
+                results = collect_results(self.results_seg_iou[organ], size, self.collect_device)
+                results_seg_nsd = collect_results(self.results_seg_nsd[organ], size, self.collect_device)
+                results_cls_acc = collect_results(self.results_cls_acc[organ], size, self.collect_device)
+                results_cls_auc = collect_results(self.results_cls_auc[organ], size, self.collect_device)
 
             if is_main_process():
                 # cast all tensors in results list to cpu
@@ -365,9 +398,12 @@ class OrgansIoUMetric(BaseMetric):
                     results = _to_cpu(results)
                     _metrics = self.compute_metrics(results)  # type: ignore
                     # Add prefix to metric names
-                if len(results_cls) > 0:
-                    results_cls = _to_cpu(results_cls)
-                    _metrics.update({"acc_cls": sum(results_cls)/len(results_cls)})
+                    _metrics.update({"SEG_NSD": sum(results_seg_nsd)/len(results_seg_nsd)})
+                if len(results_cls_acc) > 0:
+                    results_cls_acc = _to_cpu(results_cls_acc)
+                    _metrics.update({"CLS_Acc": sum(results_cls_acc)/len(results_cls_acc)})
+                    results_cls_auc = _to_cpu(results_cls_auc)
+                    _metrics.update({"CLS_AUC": roc_auc_score(np.array(results_cls_auc)[:,0], np.array(results_cls_auc)[:,1])})
 
                 if self.prefix:
                     _metrics = {
@@ -386,9 +422,13 @@ class OrgansIoUMetric(BaseMetric):
                 metrics = [None]  # type: ignore
 
             # reset the results list
-            self.results[organ].clear()
-            
+            self.results_seg_iou[organ].clear()
+            self.results_seg_nsd[organ].clear()
+            self.results_cls_acc[organ].clear()
+            self.results_cls_auc[organ].clear()
         
+        metrics[0].update({"Challenge/Classification": metrics[0]["Overall_US/CLS_Acc"]*0.5 + metrics[0]["Overall_US/CLS_AUC"]*0.5})
+        metrics[0].update({"Challenge/Segmentation": metrics[0]["Overall_US/SEG_mDice"]*0.7/100 + metrics[0]["Overall_US/SEG_NSD"]*0.3})
         broadcast_object_list(metrics)
 
         return metrics[0]
@@ -396,11 +436,22 @@ class OrgansIoUMetric(BaseMetric):
 
 
 
-    # def process(self, data_batch: Any, predictions: Sequence[dict]) -> None:
-    #     """Transfer tensors in predictions to CPU."""
-    #     for k in self.results.keys():\
-    #         self.results[k].extend(_to_cpu(predictions[k]))
-    #         self.results.extend(_to_cpu(predictions))
+
+def compute_nsd(y_true, y_pred, tolerance=1):
+    y_true = (y_true > 0).cpu().numpy().astype(np.uint8)
+    y_pred = (y_pred > 0).cpu().numpy().astype(np.uint8)
+
+    boundary_true = find_boundaries(y_true, mode='inner')
+    boundary_pred = find_boundaries(y_pred, mode='inner')
+
+    distance_true = distance_transform_edt(1 - boundary_true)
+    distance_pred = distance_transform_edt(1 - boundary_pred)
+
+    true_in_pred = (boundary_true & (distance_pred <= tolerance)).sum()
+    pred_in_true = (boundary_pred & (distance_true <= tolerance)).sum()
+
+    nsd = (true_in_pred + pred_in_true) / (boundary_true.sum() + boundary_pred.sum() + 1e-6)
+    return nsd
 
 def _to_cpu(data: Any) -> Any:
     """Transfer all tensors and BaseDataElement to cpu."""
