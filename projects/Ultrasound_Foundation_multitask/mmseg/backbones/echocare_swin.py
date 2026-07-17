@@ -393,7 +393,7 @@ class EchoCareSwinTransformer(BaseModule):
         x, hw_shape = self.patch_embed(x)
         x = self.pos_drop(x)
         x = self._tokens_to_nchw(x, hw_shape)
-
+        assert x[0][0][0][0]<100, "Check echocare forward pass patch embed"
         outs = []
         if 0 in self.out_indices:
             outs.append(self.proj_out(x))
