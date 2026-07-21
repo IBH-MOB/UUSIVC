@@ -118,7 +118,7 @@ class CLSHead(BaseDecodeHead):
 
 
     def loss(self, inputs: Tuple[Tensor], batch_data_samples: SampleList,
-             train_cfg: ConfigType) -> dict:
+             train_cfg: ConfigType = None) -> dict:
         """Forward function for training.
 
         Args:
@@ -194,7 +194,7 @@ class CLSHead(BaseDecodeHead):
     
     def _stack_batch_gt(self, batch_data_samples: SampleList) -> Tensor:
         gt_cls = [
-            torch.tensor(data_sample.class_label) for data_sample in batch_data_samples
+            torch.tensor(data_sample.gt_label[0][0]) for data_sample in batch_data_samples
         ]
         return torch.stack(gt_cls, dim=0)
     

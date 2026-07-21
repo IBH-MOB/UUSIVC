@@ -118,3 +118,6 @@ mmseg/.mim
 
 # Pytorch
 *.pth
+
+*(del)Ultrasound_Foundation_gllm
+*(del)*

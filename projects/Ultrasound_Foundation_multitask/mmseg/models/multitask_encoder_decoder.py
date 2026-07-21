@@ -1,4 +1,5 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+from cProfile import label
 import logging
 from typing import List, Optional
 
@@ -8,6 +9,7 @@ from mmengine.logging import print_log
 from torch import Tensor
 
 from mmseg.registry import MODELS
+# from mmpretrain.registry import MODELS as PRETRAIN_MODELS
 from mmseg.utils import (ConfigType, OptConfigType, OptMultiConfig,
                          OptSampleList, SampleList, add_prefix)
 from mmseg.models.segmentors.base import BaseSegmentor
@@ -78,6 +80,7 @@ class MultitaskEncoderDecoder(BaseSegmentor):
                  decode_head: ConfigType,
                  decode_cls_head: ConfigType,
                  neck: OptConfigType = None,
+                 neck_cls: OptConfigType = None,
                  auxiliary_head: OptConfigType = None,
                  train_cfg: OptConfigType = None,
                  test_cfg: OptConfigType = None,
@@ -93,6 +96,8 @@ class MultitaskEncoderDecoder(BaseSegmentor):
         self.backbone = MODELS.build(backbone)
         if neck is not None:
             self.neck = MODELS.build(neck)
+        if neck_cls is not None:
+            self.neck_cls = MODELS.build(neck_cls)
         self._init_decode_head(decode_head)
         self._init_decode_cls_head(decode_cls_head)
         self._init_auxiliary_head(auxiliary_head)
@@ -112,9 +117,8 @@ class MultitaskEncoderDecoder(BaseSegmentor):
     def _init_decode_cls_head(self, decode_cls_head: ConfigType) -> None:
         """Initialize ``decode_cls_head``"""
         self.decode_cls_head = MODELS.build(decode_cls_head)
-        # self.align_corners = self.decode_cls_head.align_corners
-        self.num_classes = self.decode_cls_head.num_classes
-        self.out_channels = self.decode_cls_head.out_channels
+        # self.num_classes = self.decode_cls_head.num_classes
+        # self.out_channels = self.decode_cls_head.out_channels
 
 
     def _init_auxiliary_head(self, auxiliary_head: ConfigType) -> None:
@@ -131,18 +135,24 @@ class MultitaskEncoderDecoder(BaseSegmentor):
         """Extract features from images."""
         x = self.backbone(inputs)
         if self.with_neck:
-            x = self.neck(x)
-        return x
+            x_seg = self.neck(x)
+        else:
+            x_seg = x
+        if self.with_neck_cls:
+            x_cls = self.neck_cls(x)
+        else:
+            x_cls = x
+        return x_seg, x_cls
 
     def encode_decode(self, inputs: Tensor,
                       batch_img_metas: List[dict]) -> Tensor:
         """Encode images with backbone and decode into a semantic segmentation
         map of the same size as input."""
-        x = self.extract_feat(inputs)
-        seg_logits = self.decode_head.predict(x, batch_img_metas,
+        x_seg_feat, x_cls_feat = self.extract_feat(inputs)
+        seg_logits = self.decode_head.predict(x_seg_feat, batch_img_metas,
                                               self.test_cfg)
         
-        cls_logits = self.decode_cls_head.predict(x, batch_img_metas,
+        cls_logits = self.decode_cls_head.predict(x_cls_feat, batch_img_metas,
                                               self.test_cfg)
 
         return seg_logits, cls_logits
@@ -160,8 +170,8 @@ class MultitaskEncoderDecoder(BaseSegmentor):
                                             self.train_cfg)
             losses.update(add_prefix(loss_decode, 'decode'))
         if len(inputs[1]):
-            loss_decode_cls = self.decode_cls_head.loss(inputs[1], data_samples[1],
-                                            self.train_cfg)
+            loss_decode_cls = self.decode_cls_head.loss(inputs[1],  data_samples[1],)
+                                            # train_cfg=self.train_cfg)
             losses.update(add_prefix(loss_decode_cls, 'decode_cls'))
         return losses
 
@@ -194,14 +204,14 @@ class MultitaskEncoderDecoder(BaseSegmentor):
             dict[str, Tensor]: a dictionary of loss components
         """
 
-        x = self.extract_feat(inputs)
+        x_seg_feat, x_cls_feat = self.extract_feat(inputs)
 
         losses = dict()
         
         x_cls_idx = []
         x_seg_idx = []
-        x_cls = []
-        x_seg = []
+        x_cls_list = []
+        x_seg_list = []
         data_samples_seg = []
         data_samples_cls = []
 
@@ -209,27 +219,31 @@ class MultitaskEncoderDecoder(BaseSegmentor):
             if not (data_samples[i].gt_sem_seg.data==1).all():
                 x_seg_idx.append(i)
                 data_samples_seg.append(data_samples[i])
-            if not data_samples[i].class_label == 2:
+            if not data_samples[i].gt_label == 2:
                 x_cls_idx.append(i)
                 data_samples_cls.append(data_samples[i])
-        
-        for i in range(len(x)):
-            x_seg.append(x[i][x_seg_idx])
-        for i in range(len(x)):
-            x_cls.append(x[i][x_cls_idx])
 
-        if len(x_seg_idx) < 2:
-            x_seg = []
+                ## move label to the same device as x_cls_feat[0] to avoid device mismatch error
+                label = data_samples_cls[-1].metainfo["gt_label"].to( x_cls_feat[0].device)
+                data_samples_cls[-1].set_metainfo({"gt_label": label})
+        
+        for i in range(len(x_seg_feat)):
+            x_seg_list.append(x_seg_feat[i][x_seg_idx])
+        for i in range(len(x_cls_feat)):
+            x_cls_list.append(x_cls_feat[i][x_cls_idx])
+
+        if len(x_seg_idx) < 1: #2: set to 2 for models using batchnorm
+            x_seg_list = []
             data_samples_seg = []
-        if len(x_cls_idx) < 1:
-            x_cls = []
+        if len(x_cls_idx) < 1: #2: set to 2 for models using batchnorm
+            x_cls_list = []
             data_samples_cls = []
-        loss_decode = self._decode_head_forward_train([x_seg,x_cls], [data_samples_seg,data_samples_cls])
+        loss_decode = self._decode_head_forward_train([x_seg_list,x_cls_list], [data_samples_seg,data_samples_cls])
         losses.update(loss_decode)
         
         # if self.with_auxiliary_head:
-        if self.with_auxiliary_head and len(x_seg) > 0:
-            loss_aux = self._auxiliary_head_forward_train(x_seg, data_samples_seg)
+        if self.with_auxiliary_head and len(x_seg_list) > 0:
+            loss_aux = self._auxiliary_head_forward_train(x_seg_list, data_samples_seg)
             losses.update(loss_aux)
 
         return losses
@@ -285,8 +299,8 @@ class MultitaskEncoderDecoder(BaseSegmentor):
         Returns:
             Tensor: Forward output of model without any post-processes.
         """
-        x = self.extract_feat(inputs)
-        return self.decode_head.forward(x)
+        x_seg_feat, x_cls_feat = self.extract_feat(inputs)
+        return self.decode_head.forward(x_seg_feat), self.decode_cls_head.forward(x_cls_feat)
 
     def slide_inference(self, inputs: Tensor,
                         batch_img_metas: List[dict]) -> Tensor:
@@ -498,3 +512,8 @@ class MultitaskEncoderDecoder(BaseSegmentor):
             })
 
         return data_samples
+    
+    @property
+    def with_neck_cls(self) -> bool:
+        """bool: whether the segmentor has neck"""
+        return hasattr(self, 'neck_cls') and self.neck_cls is not None
