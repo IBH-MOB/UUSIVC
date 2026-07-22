@@ -91,8 +91,7 @@ class OrgansIoUMetric(BaseMetric):
             pred_label = data_sample['pred_sem_seg']['data'].squeeze()
             # format_only always for test dataset without ground truth
             pred_cls = data_sample['cls_logits']
-            gt_cls = data_sample['class_label']
-
+            gt_cls = data_sample['gt_label'][0].to(pred_label.device)
             if data_sample['organ'] not in self.results_seg_iou:
                 self.results_seg_iou[data_sample['organ']] = []
                 self.results_seg_nsd[data_sample['organ']] = []
@@ -101,8 +100,8 @@ class OrgansIoUMetric(BaseMetric):
                 self.results_cls_auc[data_sample['organ']] = []
 
             if gt_cls != 2:
-                self.results_cls_acc[data_sample['organ']].append((pred_cls > 0.5) == gt_cls)
-                self.results_cls_auc[data_sample['organ']].append([gt_cls,pred_cls.cpu()[0].item()])
+                self.results_cls_acc[data_sample['organ']].append((pred_cls > 0.5)[gt_cls])
+                self.results_cls_auc[data_sample['organ']].append([gt_cls.cpu(),pred_cls.cpu()[1].item()])
             
             if (data_sample['gt_sem_seg']['data']==1).all():
                 if pred_label.shape == data_sample['gt_sem_seg']['data'].squeeze().shape: 
@@ -429,6 +428,8 @@ class OrgansIoUMetric(BaseMetric):
         
         metrics[0].update({"Challenge/Classification": metrics[0]["Overall_US/CLS_Acc"]*0.5 + metrics[0]["Overall_US/CLS_AUC"]*0.5})
         metrics[0].update({"Challenge/Segmentation": metrics[0]["Overall_US/SEG_mDice"]*0.7/100 + metrics[0]["Overall_US/SEG_NSD"]*0.3})
+        metrics[0].update({"Challenge/Overall": metrics[0]["Challenge/Segmentation"]*0.5 + metrics[0]["Challenge/Classification"]*0.5})
+
         broadcast_object_list(metrics)
 
         return metrics[0]

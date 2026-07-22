@@ -26,10 +26,10 @@ model = dict(data_preprocessor=data_preprocessor, # data preprocessor of pspnet 
                     _delete_=True,
                     type='VisionTransformerClsHead',
                     in_channels=2048,
-                    num_classes=1,
+                    num_classes=2,
                     # norm_cfg=dict(type='SyncBN', requires_grad=True),
                     loss=dict(
-                        type='CrossEntropyLoss', use_sigmoid=True, loss_weight=1.0),
+                        type='CrossEntropyLoss', use_sigmoid=False, loss_weight=1.0),
                     _scope_ = "mmpretrain",),
                 neck_cls=dict(
                     type='GlobalAveragePooling',

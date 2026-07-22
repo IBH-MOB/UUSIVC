@@ -5,7 +5,7 @@ _base_ = [
     '../../../configs/_base_/default_runtime.py',
     '../../../configs/_base_/schedules/schedule_160k.py'
 ]
-work_dir = '/scratch/dr/m.badran/UUSIC/mmseg/work_dirs/uusivc_multitask_pspnet_r50_crop256_test'  
+work_dir = '/scratch/dr/m.badran/UUSIC/mmseg/work_dirs/uusivc_multitask_pspnet_r50_256_multiclassCLS'  
 
 custom_imports = dict(
     imports=['projects.Ultrasound_Foundation_multitask.mmseg.datasets.uusivc',
@@ -26,21 +26,21 @@ train_dataloader = dict(batch_size=4, num_workers=4)
 
 # train_cfg = dict(type='IterBasedTrainLoop', max_iters=20000, val_interval=4)# for debugging validation
 
-# visualizer = dict(
-#     type='SegLocalVisualizer',
-#     vis_backends=[
-#         dict(type='LocalVisBackend'),
-#         dict(
-#             type='TensorboardVisBackend',
-#             name=work_dir.split('/')[-1],
-#         ),
-#         dict(
-#             type='WandbVisBackend',
-#             init_kwargs=dict(
-#                 project='UUSIVC-mmseg-multitask',
-#                 name=work_dir.split('/')[-1],
-#             )
-#         )
-#     ],
-#     name='visualizer'
-# )
+visualizer = dict(
+    type='SegLocalVisualizer',
+    vis_backends=[
+        dict(type='LocalVisBackend'),
+        dict(
+            type='TensorboardVisBackend',
+            name=work_dir.split('/')[-1],
+        ),
+        dict(
+            type='WandbVisBackend',
+            init_kwargs=dict(
+                project='UUSIVC-mmseg-multitask',
+                name=work_dir.split('/')[-1],
+            )
+        )
+    ],
+    name='visualizer'
+)

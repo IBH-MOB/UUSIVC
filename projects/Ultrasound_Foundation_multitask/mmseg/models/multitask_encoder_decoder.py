@@ -17,6 +17,7 @@ from mmengine.structures import PixelData
 from mmseg.models.utils import resize
 from mmseg.structures import SegDataSample
 import torch
+from mmpretrain.structures import DataSample
 
 @MODELS.register_module()
 class MultitaskEncoderDecoder(BaseSegmentor):
@@ -152,8 +153,12 @@ class MultitaskEncoderDecoder(BaseSegmentor):
         seg_logits = self.decode_head.predict(x_seg_feat, batch_img_metas,
                                               self.test_cfg)
         
-        cls_logits = self.decode_cls_head.predict(x_cls_feat, batch_img_metas,
-                                              self.test_cfg)
+        batch_img_metas_samples = []
+        for img in batch_img_metas:
+            batch_img_metas_samples.append(DataSample(metainfo=img))
+        cls_logits = self.decode_cls_head.predict(x_cls_feat, batch_img_metas_samples,)
+                                            #   self.test_cfg)
+                                              
 
         return seg_logits, cls_logits
 
@@ -232,10 +237,10 @@ class MultitaskEncoderDecoder(BaseSegmentor):
         for i in range(len(x_cls_feat)):
             x_cls_list.append(x_cls_feat[i][x_cls_idx])
 
-        if len(x_seg_idx) < 1: #2: set to 2 for models using batchnorm
+        if len(x_seg_idx) < 2: #set to 2 for models using batchnorm
             x_seg_list = []
             data_samples_seg = []
-        if len(x_cls_idx) < 1: #2: set to 2 for models using batchnorm
+        if len(x_cls_idx) < 2: #set to 2 for models using batchnorm
             x_cls_list = []
             data_samples_cls = []
         loss_decode = self._decode_head_forward_train([x_seg_list,x_cls_list], [data_samples_seg,data_samples_cls])
@@ -503,12 +508,15 @@ class MultitaskEncoderDecoder(BaseSegmentor):
                 i_seg_logits = i_seg_logits.sigmoid()
                 i_seg_pred = (i_seg_logits >
                               self.decode_head.threshold).to(i_seg_logits)
+            
+            # print("*****",cls_logits[i])
             data_samples[i].set_data({
                 'seg_logits':
                 PixelData(**{'data': i_seg_logits}),
                 'pred_sem_seg':
                 PixelData(**{'data': i_seg_pred}),
-                'cls_logits': cls_logits[i:i + 1, :],
+                'cls_logits': cls_logits[i].pred_score,
+                'cls_label': cls_logits[i].pred_label
             })
 
         return data_samples

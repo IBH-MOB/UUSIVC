@@ -76,7 +76,7 @@ class UUSIVCSEGClsDataset(Dataset):
                         seg_fields=[],
                         # test_mode=test_mode,
                         organ=organ,
-                        gt_label=torch.tensor([[int(i)]])#int(i)
+                        gt_label=torch.tensor([int(i)])#int(i)
                     )
                     data_list.append(data_info)
         return data_list
