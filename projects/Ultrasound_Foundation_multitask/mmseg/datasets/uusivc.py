@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from mmengine.dataset.base_dataset import Compose
 
+import torch
 # from mmseg.registry import DATASETS
 # @DATASETS.register_module()
 
@@ -75,7 +76,7 @@ class UUSIVCSEGClsDataset(Dataset):
                         seg_fields=[],
                         # test_mode=test_mode,
                         organ=organ,
-                        class_label=int(i)
+                        gt_label=torch.tensor([int(i)])#int(i)
                     )
                     data_list.append(data_info)
         return data_list

@@ -11,6 +11,8 @@ from mmseg.models.losses import accuracy
 from typing import Tuple
 from torch import Tensor
 from typing import List, Tuple
+from mmpretrain.structures import DataSample
+import torch.nn.functional as F
 
 @MODELS.register_module()
 class CLSHead(BaseDecodeHead):
@@ -81,10 +83,13 @@ class CLSHead(BaseDecodeHead):
 
         self.gap = nn.AdaptiveAvgPool2d(1)
 
-        if self.num_classes == 2:
-            self.fc = nn.Linear(self.out_channels, 1)
-        else:
-            self.fc = nn.Linear(self.out_channels, self.num_classes)
+        # if self.num_classes == 2:
+        #     self.fc = nn.Linear(self.out_channels, 1)
+        # else:
+        #     self.fc = nn.Linear(self.out_channels, self.num_classes)
+
+        self.fc = nn.Linear(self.out_channels, self.num_classes)
+
         # self.loss_module = MODELS.build(loss_cls)
 
         self.ignore_index = 2 # ignore instances with ground truth label 2 
@@ -118,7 +123,7 @@ class CLSHead(BaseDecodeHead):
 
 
     def loss(self, inputs: Tuple[Tensor], batch_data_samples: SampleList,
-             train_cfg: ConfigType) -> dict:
+             train_cfg: ConfigType = None) -> dict:
         """Forward function for training.
 
         Args:
@@ -194,14 +199,14 @@ class CLSHead(BaseDecodeHead):
     
     def _stack_batch_gt(self, batch_data_samples: SampleList) -> Tensor:
         gt_cls = [
-            torch.tensor(data_sample.class_label) for data_sample in batch_data_samples
+            torch.tensor(data_sample.gt_label[0]) for data_sample in batch_data_samples
         ]
         return torch.stack(gt_cls, dim=0)
     
 
-    def predict_by_feat(self, seg_logits: Tensor,
-                        batch_img_metas: List[dict]) -> Tensor:
-        """Transform a batch of output seg_logits to the input shape.
+    def predict_by_feat(self, cls_logits: Tensor,
+                        batch_img_metas: List[dict]= None) -> Tensor:
+        """Transform a batch of output cls_logits to the input shape.
 
         Args:
             seg_logits (Tensor): The output from decode head forward function.
@@ -212,17 +217,61 @@ class CLSHead(BaseDecodeHead):
             Tensor: Outputs segmentation logits map.
         """
 
-        if isinstance(batch_img_metas[0]['img_shape'], torch.Size):
-            # slide inference
-            size = batch_img_metas[0]['img_shape']
-        elif 'pad_shape' in batch_img_metas[0]:
-            size = batch_img_metas[0]['pad_shape'][:2]
-        else:
-            size = batch_img_metas[0]['img_shape']
+        # if isinstance(batch_img_metas[0]['img_shape'], torch.Size):
+        #     # slide inference
+        #     size = batch_img_metas[0]['img_shape']
+        # elif 'pad_shape' in batch_img_metas[0]:
+        #     size = batch_img_metas[0]['pad_shape'][:2]
+        # else:
+        #     size = batch_img_metas[0]['img_shape']
 
         # seg_logits = resize(
         #     input=seg_logits,
         #     size=size,
         #     mode='bilinear',
         #     align_corners=self.align_corners)
-        return seg_logits
+        return cls_logits
+
+    def predict(self, inputs: Tuple[Tensor], batch_img_metas: List[dict],
+                test_cfg: ConfigType = None) -> Tensor:
+        """Forward function for prediction.
+
+        Args:
+            inputs (Tuple[Tensor]): List of multi-level img features.
+            batch_img_metas (dict): List Image info where each dict may also
+                contain: 'img_shape', 'scale_factor', 'flip', 'img_path',
+                'ori_shape', and 'pad_shape'.
+                For details on the values of these keys see
+                `mmseg/datasets/pipelines/formatting.py:PackSegInputs`.
+            test_cfg (dict): The testing config.
+
+        Returns:
+            Tensor: Outputs segmentation logits map.
+        """
+        cls_score = self.forward(inputs)
+
+        cls_score = self._get_predictions(cls_score,batch_img_metas)
+        # return self.predict_by_feat(cls_score, batch_img_metas)
+        return cls_score
+    
+    
+    def _get_predictions(self, cls_score, data_samples):
+        """Post-process the output of head.
+
+        Including softmax and set ``pred_label`` of data samples.
+        """
+        pred_scores = F.softmax(cls_score, dim=1)
+        pred_labels = pred_scores.argmax(dim=1, keepdim=True).detach()
+
+        out_data_samples = []
+        if data_samples is None:
+            data_samples = [None for _ in range(pred_scores.size(0))]
+
+        for data_sample, score, label in zip(data_samples, pred_scores,
+                                             pred_labels):
+            if data_sample is None:
+                data_sample = DataSample()
+
+            data_sample.set_pred_score(score).set_pred_label(label)
+            out_data_samples.append(data_sample)
+        return out_data_samples

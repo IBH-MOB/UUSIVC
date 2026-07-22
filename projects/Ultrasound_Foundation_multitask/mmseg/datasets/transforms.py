@@ -42,7 +42,7 @@ class PackSegClsInputs(BaseTransform):
     """
 
     def __init__(self,
-                 meta_keys=('img_path', 'class_label', 'ori_shape',
+                 meta_keys=('img_path', 'gt_label', 'ori_shape',
                             'img_shape', 'pad_shape', 'scale_factor', 'flip',
                             'flip_direction', 'reduce_zero_label','organ','label')):
         self.meta_keys = meta_keys
