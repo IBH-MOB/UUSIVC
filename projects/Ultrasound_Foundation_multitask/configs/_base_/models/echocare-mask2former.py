@@ -23,11 +23,12 @@ model = dict(
         qkv_bias=True,
         use_v2=True,
         out_indices=(1, 2, 3, 4),
+        frozen_stages=4,
         patch_norm=False,
         init_cfg=dict(
             type='Pretrained',
             checkpoint='/scratch/dr/o.iraqy/UUSIVC-MMSeg/weights/'
-                       'echocare_encoder_mmseg.pth')
+                       'echocare_encoder_mmseg.pth'),
                        ),
     # backbone=dict(
     #     type='ResNet',
@@ -45,7 +46,7 @@ model = dict(
     decode_head=dict(
         type='Mask2FormerHead',
         in_channels=[256, 512, 1024, 2048],
-        strides=[2, 2, 2, 22],
+        strides=[2, 2, 2, 2],
         feat_channels=256,
         out_channels=256,
         num_classes=2,

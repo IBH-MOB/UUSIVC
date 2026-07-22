@@ -6,7 +6,7 @@ _base_ = [
     '../../../configs/_base_/default_runtime.py',
     # '../../../configs/_base_/schedules/schedule_20k.py'
 ]
-work_dir = '/scratch/dr/o.iraqy/UUSIVC-MMSeg/work_dirs/echocare-mask2former'
+work_dir = '/scratch/dr/o.iraqy/UUSIVC-MMSeg/work_dirs/echocare-mask2former_frozen_backbone'
 
 custom_imports = dict(
     imports=['projects.Ultrasound_Foundation_multitask.mmseg.datasets.uusivc',
@@ -17,7 +17,22 @@ custom_imports = dict(
              'projects.Ultrasound_Foundation_multitask.mmseg.backbones.echocare_swin',
              ],)
 # crop_size = (512, 1024)
-crop_size = (512, 512)
+crop_size = (256, 256)
+
+train_pipeline = [
+    dict(type='LoadImageFromFile'),
+    dict(type='LoadAnnotations'),
+    dict(type='Resize', scale=crop_size, keep_ratio=False),
+    dict(type='RandomFlip', prob=0.5),
+    dict(type='PhotoMetricDistortion'),
+    dict(type='PackSegClsInputs'),
+]
+test_pipeline = [
+    dict(type='LoadImageFromFile'),
+    dict(type='Resize', scale=crop_size, keep_ratio=False),
+    dict(type='LoadAnnotations'),
+    dict(type='PackSegClsInputs'),
+]
 # data_preprocessor = dict(size=crop_size)
 # model = dict(data_preprocessor=data_preprocessor, # data preprocessor of pspnet is useing normalization of bdd100k
 #              decode_head=dict(num_classes=2), decode_cls_head=dict(num_classes=2), auxiliary_head=dict(num_classes=2))
@@ -42,7 +57,10 @@ depths = [2, 2, 18, 2]
 #     dict(type='PhotoMetricDistortion'),
 #     dict(type='PackSegInputs')
 # ]
-train_dataloader = dict(batch_size=4, num_workers=1)
+train_dataloader = dict(batch_size=4, num_workers=10,
+                        dataset=dict(pipeline=train_pipeline))
+val_dataloader = dict(dataset=dict(pipeline=test_pipeline))
+test_dataloader = dict(dataset=dict(pipeline=test_pipeline))
 
 data_preprocessor = dict(size=crop_size)
 model = dict(data_preprocessor=data_preprocessor, # data preprocessor of pspnet is useing normalization of bdd100k
@@ -95,7 +113,7 @@ param_scheduler = [
 
 # training schedule for 160k
 train_cfg = dict(
-    type='IterBasedTrainLoop', max_iters=160000, val_interval=2000)
+    type='IterBasedTrainLoop', max_iters=160000, val_interval=16000)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 visualizer = dict(

@@ -18,8 +18,26 @@ custom_imports = dict(
 
 crop_size = (384, 384)
 
+train_pipeline = [
+    dict(type='LoadImageFromFile'),
+    dict(type='LoadAnnotations'),
+    dict(type='Resize', scale=crop_size, keep_ratio=False),
+    dict(type='RandomFlip', prob=0.5),
+    dict(type='PhotoMetricDistortion'),
+    dict(type='PackSegClsInputs'),
+]
+test_pipeline = [
+    dict(type='LoadImageFromFile'),
+    dict(type='Resize', scale=crop_size, keep_ratio=False),
+    dict(type='LoadAnnotations'),
+    dict(type='PackSegClsInputs'),
+]
+
 depths = [2, 2, 18, 2]
-train_dataloader = dict(batch_size=4, num_workers=1)
+train_dataloader = dict(batch_size=16, num_workers=10,
+                        dataset=dict(pipeline=train_pipeline))
+val_dataloader = dict(dataset=dict(pipeline=test_pipeline))
+test_dataloader = dict(dataset=dict(pipeline=test_pipeline))
 
 data_preprocessor = dict(
     type='SegDataPreProcessor',

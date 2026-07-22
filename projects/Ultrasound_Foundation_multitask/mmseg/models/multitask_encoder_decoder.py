@@ -218,7 +218,7 @@ class MultitaskEncoderDecoder(BaseSegmentor):
         for i in range(len(x)):
             x_cls.append(x[i][x_cls_idx])
 
-        if len(x_seg_idx) < 2:
+        if len(x_seg_idx) < 1:
             x_seg = []
             data_samples_seg = []
         if len(x_cls_idx) < 1:

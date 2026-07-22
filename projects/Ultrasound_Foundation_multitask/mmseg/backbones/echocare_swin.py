@@ -220,6 +220,7 @@ class EchoCareSwinTransformer(BaseModule):
                  act_cfg=dict(type='GELU'),
                  norm_cfg=dict(type='LN'),
                  pretrained=None,
+                 frozen_stages: int = -1,
                  init_cfg=None):
         assert not (init_cfg and pretrained), \
             'init_cfg and pretrained cannot be specified at the same time'
@@ -233,10 +234,13 @@ class EchoCareSwinTransformer(BaseModule):
         for idx in out_indices:
             assert 0 <= idx <= max_out, \
                 f'out_indices must be in [0, {max_out}], got {idx}'
+        assert -1 <= frozen_stages <= max_out, \
+            f'frozen_stages must be in [-1, {max_out}], got {frozen_stages}'
 
         self.out_indices = tuple(out_indices)
         self.use_v2 = use_v2
         self.num_layers = len(depths)
+        self.frozen_stages = frozen_stages
         if isinstance(window_size, (list, tuple)):
             assert len(window_size) == 2 and window_size[0] == window_size[1], \
                 'window_size must be an int or a 2-element uniform tuple/list'
@@ -374,6 +378,28 @@ class EchoCareSwinTransformer(BaseModule):
                     f'Successfully loaded all weights for '
                     f'{self.__class__.__name__} from '
                     f'{self.init_cfg["checkpoint"]}', logger='current')
+
+    def train(self, mode=True):
+        """Convert the model into training mode while keeping frozen stages
+        in eval mode."""
+        super().train(mode)
+        self._freeze_stages()
+
+    def _freeze_stages(self):
+        if self.frozen_stages >= 0:
+            self.patch_embed.eval()
+            for param in self.patch_embed.parameters():
+                param.requires_grad = False
+            self.pos_drop.eval()
+        for i in range(1, self.frozen_stages + 1):
+            if self.use_v2:
+                self.v2_blocks[i - 1].eval()
+                for param in self.v2_blocks[i - 1].parameters():
+                    param.requires_grad = False
+            m = self.stages[i - 1]
+            m.eval()
+            for param in m.parameters():
+                param.requires_grad = False
 
     def forward(self, x):
         """Forward.
