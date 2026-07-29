@@ -6,7 +6,7 @@ _base_ = [
     '../../../configs/_base_/default_runtime.py',
     # '../../../configs/_base_/schedules/schedule_20k.py'
 ]
-work_dir = '/scratch/dr/o.iraqy/UUSIVC-MMSeg/work_dirs/swinB-mask2former'
+work_dir = '/scratch/dr/o.iraqy/UUSIVC-MMSeg/work_dirs/swinB-mask2former_fulltrain_cityscapes_tranforms'
 
 custom_imports = dict(
     imports=['projects.Ultrasound_Foundation_multitask.mmseg.datasets.uusivc',
@@ -34,15 +34,15 @@ test_pipeline = [
 ]
 
 depths = [2, 2, 18, 2]
-train_dataloader = dict(batch_size=16, num_workers=10,
+train_dataloader = dict(batch_size=4, num_workers=2,
                         dataset=dict(pipeline=train_pipeline))
 val_dataloader = dict(dataset=dict(pipeline=test_pipeline))
 test_dataloader = dict(dataset=dict(pipeline=test_pipeline))
 
 data_preprocessor = dict(
     type='SegDataPreProcessor',
-    mean=[123.675, 116.28, 103.53],
-    std=[58.395, 57.12, 57.375],
+    mean=[0.157926 * 255, 0.157926 * 255, 0.157926 * 255],
+    std=[0.199434 * 255, 0.199434 * 255, 0.199434 * 255],
     bgr_to_rgb=True,
     pad_val=0,
     seg_pad_val=255,
@@ -98,7 +98,7 @@ param_scheduler = [
 
 # training schedule for 160k
 train_cfg = dict(
-    type='IterBasedTrainLoop', max_iters=160000, val_interval=2000)
+    type='IterBasedTrainLoop', max_iters=160000, val_interval=16000)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 visualizer = dict(
@@ -119,4 +119,5 @@ visualizer = dict(
     ],
     name='visualizer'
 )
+checkpoint=dict(interval=16000, save_best='Challenge/Overall', max_keep_ckpts=3)
 auto_scale_lr = dict(enable=False, base_batch_size=16)

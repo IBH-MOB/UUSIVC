@@ -3,8 +3,8 @@ pretrained = 'https://download.openmmlab.com/mmsegmentation/v0.5/pretrain/swin/s
 
 data_preprocessor = dict(
     type='SegDataPreProcessor',
-    mean=[123.675, 116.28, 103.53],
-    std=[58.395, 57.12, 57.375],
+    mean=[0.157926 * 255, 0.157926 * 255, 0.157926 * 255],
+    std=[0.199434 * 255, 0.199434 * 255, 0.199434 * 255],
     bgr_to_rgb=True,
     pad_val=0,
     seg_pad_val=255)

@@ -1,12 +1,9 @@
 _base_ = [
-    # '../../../configs/_base_/models/pspnet_r50-d8.py',
-    # './_base_/models/pspnet_r50_multitask.py',
     './_base_/models/echocare-mask2former.py',
     './_base_/datasets/uusivc_dataset.py',
     '../../../configs/_base_/default_runtime.py',
-    # '../../../configs/_base_/schedules/schedule_20k.py'
 ]
-work_dir = '/scratch/dr/o.iraqy/UUSIVC-MMSeg/work_dirs/echocare-mask2former_frozen_backbone'
+work_dir = '/scratch/dr/o.iraqy/UUSIVC-MMSeg/work_dirs/frozen-echocare-mask2former_e6_pipeline'
 
 custom_imports = dict(
     imports=['projects.Ultrasound_Foundation_multitask.mmseg.datasets.uusivc',
@@ -16,7 +13,6 @@ custom_imports = dict(
              'projects.Ultrasound_Foundation_multitask.mmseg.datasets.transforms',
              'projects.Ultrasound_Foundation_multitask.mmseg.backbones.echocare_swin',
              ],)
-# crop_size = (512, 1024)
 crop_size = (256, 256)
 
 train_pipeline = [
@@ -33,37 +29,19 @@ test_pipeline = [
     dict(type='LoadAnnotations'),
     dict(type='PackSegClsInputs'),
 ]
-# data_preprocessor = dict(size=crop_size)
-# model = dict(data_preprocessor=data_preprocessor, # data preprocessor of pspnet is useing normalization of bdd100k
-#              decode_head=dict(num_classes=2), decode_cls_head=dict(num_classes=2), auxiliary_head=dict(num_classes=2))
-
-# train_cfg = dict(type='IterBasedTrainLoop', max_iters=20000, val_interval=2000)
-# train_dataloader = dict(batch_size=1, num_workers=1)
-
-# train_cfg = dict(type='IterBasedTrainLoop', max_iters=20000, val_interval=4)# for debugging validation
 
 depths = [2, 2, 18, 2]
-# dataset config
-# train_pipeline = [
-#     dict(type='LoadImageFromFile'),
-#     dict(type='LoadAnnotations', reduce_zero_label=True),
-#     # dict(
-#     #     type='RandomChoiceResize',
-#     #     scales=[int(x * 0.1 * 640) for x in range(5, 21)],
-#     #     resize_type='ResizeShortestEdge',
-#     #     max_size=2560),
-#     dict(type='RandomCrop', crop_size=crop_size, cat_max_ratio=0.75),
-#     dict(type='RandomFlip', prob=0.5),
-#     dict(type='PhotoMetricDistortion'),
-#     dict(type='PackSegInputs')
-# ]
-train_dataloader = dict(batch_size=4, num_workers=10,
+
+train_dataloader = dict(batch_size=4, num_workers=2,
                         dataset=dict(pipeline=train_pipeline))
 val_dataloader = dict(dataset=dict(pipeline=test_pipeline))
 test_dataloader = dict(dataset=dict(pipeline=test_pipeline))
 
-data_preprocessor = dict(size=crop_size)
-model = dict(data_preprocessor=data_preprocessor, # data preprocessor of pspnet is useing normalization of bdd100k
+data_preprocessor = dict(
+    mean=[0.157926 * 255, 0.157926 * 255, 0.157926 * 255],
+    std=[0.199434 * 255, 0.199434 * 255, 0.199434 * 255],
+    size=crop_size)
+model = dict(data_preprocessor=data_preprocessor,
              decode_head=dict(num_classes=2), decode_cls_head=dict(num_classes=2), auxiliary_head=dict(num_classes=2))
 
 # set all layers in backbone to lr_mult=0.1
@@ -116,6 +94,7 @@ train_cfg = dict(
     type='IterBasedTrainLoop', max_iters=160000, val_interval=16000)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
+checkpoint = dict(interval=16000, save_best='Challenge/Overall', max_keep_ckpts=3)
 visualizer = dict(
     type='SegLocalVisualizer',
     vis_backends=[
@@ -134,17 +113,5 @@ visualizer = dict(
     ],
     name='visualizer'
 )
-# default_hooks = dict(
-#     timer=dict(type='IterTimerHook'),
-#     logger=dict(type='LoggerHook', interval=50, log_metric_by_epoch=False),
-#     param_scheduler=dict(type='ParamSchedulerHook'),
-#     checkpoint=dict(
-#         type='CheckpointHook', by_epoch=False, interval=5000,
-#         save_best='mIoU'),
-#     sampler_seed=dict(type='DistSamplerSeedHook'),)
 
-# Default setting for scaling LR automatically
-#   - `enable` means enable scaling LR automatically
-#       or not by default.
-#   - `base_batch_size` = (8 GPUs) x (2 samples per GPU).
 auto_scale_lr = dict(enable=False, base_batch_size=16)

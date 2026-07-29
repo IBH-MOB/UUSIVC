@@ -1,0 +1,193 @@
+"""R1 — EchoCare Swin v2 (UNFROZEN, frozen_stages=2) + Mask2Former.
+
+Same as the frozen echocare E6 baseline except the encoder is partially
+unfrozen: stages 2-3 train with lr_mult=0.1, stages 0-1 stay frozen.
+Mask2Former queries reduced 100 -> 20 (binary segmentation).
+
+Expected: +2-4 pts Overall vs frozen echocare E6 (plan1 enhancement C).
+"""
+_base_ = ['./_base_phase2.py']
+
+custom_imports = dict(
+    imports=[
+        'projects.Ultrasound_Foundation_multitask.mmseg.datasets.uusivc',
+        'projects.Ultrasound_Foundation_multitask.mmseg.evaluation.organs_metric',
+        'projects.Ultrasound_Foundation_multitask.mmseg.models.multitask_encoder_decoder',
+        'projects.Ultrasound_Foundation_multitask.mmseg.models.cls_head',
+        'projects.Ultrasound_Foundation_multitask.mmseg.datasets.transforms',
+        'projects.Ultrasound_Foundation_multitask.mmseg.backbones.echocare_swin',
+    ])
+
+work_dir = '/scratch/dr/o.iraqy/UUSIVC-MMSeg/work_dirs/phase2_r1_echocare_unfrozen_mask2former'
+
+# Re-declare base variables (mmengine merges _base_ after child exec)
+crop_size = (384, 384)
+data_preprocessor = dict(
+    type='SegDataPreProcessor',
+    mean=[0.157926 * 255, 0.157926 * 255, 0.157926 * 255],
+    std=[0.199434 * 255, 0.199434 * 255, 0.199434 * 255],
+    bgr_to_rgb=True, pad_val=0, seg_pad_val=255, size=crop_size)
+norm_cfg = dict(type='SyncBN', requires_grad=True)
+optimizer = dict(type='AdamW', lr=0.0001, weight_decay=0.05, eps=1e-8,
+                 betas=(0.9, 0.999))
+
+# EchoCare has 5 output levels; tap the 4 deepest (stride 4, 8, 16, 32).
+depths = (2, 2, 18, 2)
+model = dict(
+    type='MultitaskEncoderDecoder',
+    data_preprocessor=data_preprocessor,
+    backbone=dict(
+        type='EchoCareSwinTransformer',
+        in_channels=3,
+        embed_dims=128,
+        window_size=8,
+        patch_size=2,
+        strides=(2, 2, 2, 2),
+        depths=depths,
+        num_heads=(4, 8, 16, 32),
+        mlp_ratio=4,
+        qkv_bias=True,
+        use_v2=True,
+        out_indices=(1, 2, 3, 4),
+        frozen_stages=2,           # was 4; unfreeze stages 2-3
+        patch_norm=False,
+        init_cfg=dict(
+            type='Pretrained',
+            checkpoint='/scratch/dr/o.iraqy/UUSIVC-MMSeg/weights/'
+                       'echocare_encoder_mmseg.pth')),
+    decode_head=dict(
+        type='Mask2FormerHead',
+        in_channels=[256, 512, 1024, 2048],
+        strides=[4, 8, 16, 32],
+        feat_channels=256,
+        out_channels=256,
+        num_classes=2,
+        num_queries=20,            # was 100
+        num_transformer_feat_level=3,
+        align_corners=False,
+        pixel_decoder=dict(
+            type='mmdet.MSDeformAttnPixelDecoder',
+            num_outs=3,
+            strides=[4, 8, 16, 32],
+            norm_cfg=dict(type='GN', num_groups=32),
+            act_cfg=dict(type='ReLU'),
+            encoder=dict(
+                num_layers=6,
+                layer_cfg=dict(
+                    self_attn_cfg=dict(
+                        embed_dims=256, num_heads=8, num_levels=3,
+                        num_points=4, im2col_step=64, dropout=0.0,
+                        batch_first=True, norm_cfg=None, init_cfg=None),
+                    ffn_cfg=dict(
+                        embed_dims=256, feedforward_channels=1024,
+                        num_fcs=2, ffn_drop=0.0,
+                        act_cfg=dict(type='ReLU', inplace=True))),
+                init_cfg=None),
+            positional_encoding=dict(num_feats=128, normalize=True),
+            init_cfg=None),
+        enforce_decoder_input_project=False,
+        positional_encoding=dict(num_feats=128, normalize=True),
+        transformer_decoder=dict(
+            return_intermediate=True,
+            num_layers=9,
+            layer_cfg=dict(
+                self_attn_cfg=dict(
+                    embed_dims=256, num_heads=8, attn_drop=0.0, proj_drop=0.0,
+                    dropout_layer=None, batch_first=True),
+                cross_attn_cfg=dict(
+                    embed_dims=256, num_heads=8, attn_drop=0.0, proj_drop=0.0,
+                    dropout_layer=None, batch_first=True),
+                ffn_cfg=dict(
+                    embed_dims=256, feedforward_channels=2048, num_fcs=2,
+                    act_cfg=dict(type='ReLU', inplace=True), ffn_drop=0.0,
+                    dropout_layer=None, add_identity=True)),
+            init_cfg=None),
+        loss_cls=dict(
+            type='mmdet.CrossEntropyLoss', use_sigmoid=False, loss_weight=2.0,
+            reduction='mean', class_weight=[1.0] * 2 + [0.1]),
+        loss_mask=dict(
+            type='mmdet.CrossEntropyLoss', use_sigmoid=True, reduction='mean',
+            loss_weight=5.0),
+        loss_dice=dict(
+            type='mmdet.DiceLoss', use_sigmoid=True, activate=True,
+            reduction='mean', naive_dice=True, eps=1.0, loss_weight=5.0),
+        train_cfg=dict(
+            num_points=12544, oversample_ratio=3.0,
+            importance_sample_ratio=0.75,
+            assigner=dict(
+                type='mmdet.HungarianAssigner',
+                match_costs=[
+                    dict(type='mmdet.ClassificationCost', weight=2.0),
+                    dict(type='mmdet.CrossEntropyLossCost', weight=5.0,
+                         use_sigmoid=True),
+                    dict(type='mmdet.DiceCost', weight=5.0, pred_act=True,
+                         eps=1.0)]),
+            sampler=dict(type='mmdet.MaskPseudoSampler'))),
+    decode_cls_head=dict(
+        type='CLSHead',
+        in_channels=2048,
+        in_index=3,
+        channels=512,
+        num_convs=1,
+        concat_input=False,
+        dropout_ratio=0.1,
+        num_classes=2,
+        norm_cfg=norm_cfg,
+        align_corners=False,
+        loss_decode=dict(type='CrossEntropyLoss', use_sigmoid=True,
+                         loss_weight=1.0)),
+    auxiliary_head=dict(
+        type='FCNHead',
+        in_channels=2048,
+        in_index=3,
+        channels=256,
+        num_convs=1,
+        concat_input=False,
+        dropout_ratio=0.1,
+        num_classes=2,
+        norm_cfg=norm_cfg,
+        align_corners=False,
+        loss_decode=dict(type='CrossEntropyLoss', use_sigmoid=False,
+                         loss_weight=0.4)),
+    train_cfg=dict(),
+    test_cfg=dict(mode='whole'))
+
+# EchoCare-specific paramwise keys (Swin v2 stages + downsample norms).
+backbone_norm_multi = dict(lr_mult=0.1, decay_mult=0.0)
+backbone_embed_multi = dict(lr_mult=0.1, decay_mult=0.0)
+embed_multi = dict(lr_mult=1.0, decay_mult=0.0)
+custom_keys = {
+    'backbone': dict(lr_mult=0.1, decay_mult=1.0),
+    'backbone.patch_embed.norm': backbone_norm_multi,
+    'backbone.norm': backbone_norm_multi,
+    'absolute_pos_embed': backbone_embed_multi,
+    'relative_position_bias_table': backbone_embed_multi,
+    'query_embed': embed_multi,
+    'query_feat': embed_multi,
+    'level_embed': embed_multi,
+}
+custom_keys.update({
+    f'backbone.stages.{s}.blocks.{b}.norm': backbone_norm_multi
+    for s, n in enumerate(depths) for b in range(n)
+})
+custom_keys.update({
+    f'backbone.stages.{s}.downsample.norm': backbone_norm_multi
+    for s in range(len(depths) - 1)
+})
+optim_wrapper = dict(
+    type='OptimWrapper',
+    optimizer=optimizer,
+    clip_grad=dict(max_norm=0.01, norm_type=2),
+    paramwise_cfg=dict(custom_keys=custom_keys, norm_decay_mult=0.0))
+
+visualizer = dict(
+    type='SegLocalVisualizer',
+    vis_backends=[
+        dict(type='LocalVisBackend'),
+        dict(type='TensorboardVisBackend',
+             name=work_dir.split('/')[-1]),
+        dict(type='WandbVisBackend',
+             init_kwargs=dict(project='UUSIVC-mmseg',
+                              name=work_dir.split('/')[-1])),
+    ],
+    name='visualizer')
