@@ -1,8 +1,8 @@
 # dataset settings
 dataset_type = 'UUSIVCSEGClsDataset'
 # data_root = '/scratch/dr/m.badran/UUSIC/dataset-challenge/Extracted/TRAIN/Challenge_Data_Public/image_cls'
-data_root_train = '/scratch/dr/UUSIVC26/mmseg_format/train'
-data_root_val = '/scratch/dr/UUSIVC26/mmseg_format/val'
+data_root_train = '/scratch/dr/UUSIVC26/mmseg_format_full/train'
+data_root_val = '/scratch/dr/UUSIVC26/mmseg_format_full/val'
 
 # data_root='/scratch/dr/m.badran/UUSIC/dataset-challenge-sample'
 
@@ -80,5 +80,6 @@ val_dataloader = dict(
         label_map=dict({255: 1})))
 test_dataloader = val_dataloader
 
-val_evaluator = dict(type='OrgansIoUMetric', iou_metrics=['mIoU', 'mDice', 'mFscore'])
+val_evaluator = dict(type='OrgansIoUMetric', iou_metrics=['mIoU', 'mDice', 'mFscore'],
+                     data_root=data_root_val)
 test_evaluator = val_evaluator
