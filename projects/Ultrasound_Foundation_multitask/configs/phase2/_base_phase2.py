@@ -21,8 +21,8 @@ _base_ = [
     '../../../../configs/_base_/default_runtime.py',
 ]
 
-crop_size = (384, 384)
-
+crop_size = (518, 518)
+batch_size = 8
 # E6 dataset z-score normalization (grayscale ultrasound, replicated to 3ch)
 data_preprocessor = dict(
     type='SegDataPreProcessor',
@@ -55,7 +55,7 @@ test_pipeline = [
 ]
 
 train_dataloader = dict(
-    batch_size=4, num_workers=2, dataset=dict(pipeline=train_pipeline))
+    batch_size=batch_size, num_workers=8, dataset=dict(pipeline=train_pipeline))
 val_dataloader = dict(dataset=dict(pipeline=test_pipeline))
 test_dataloader = dict(dataset=dict(pipeline=test_pipeline))
 
@@ -75,7 +75,15 @@ train_cfg = dict(type='IterBasedTrainLoop', max_iters=160000, val_interval=16000
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 
-checkpoint = dict(interval=16000, save_best='Challenge/Overall',
-                  max_keep_ckpts=3)
+default_hooks = dict(
+    checkpoint=dict(
+        type='CheckpointHook',
+        by_epoch=False,
+        interval=16000,
+        save_best='Challenge/Overall',
+        rule='greater',
+        max_keep_ckpts=3,
+    ),
+)
 
-auto_scale_lr = dict(enable=False, base_batch_size=16)
+auto_scale_lr = dict(enable=False, base_batch_size=batch_size)

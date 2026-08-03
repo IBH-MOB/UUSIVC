@@ -22,9 +22,9 @@ custom_imports = dict(
         'projects.Ultrasound_Foundation_multitask.mmseg.datasets.transforms',
     ])
 
-work_dir = '/scratch/dr/o.iraqy/UUSIVC-MMSeg/work_dirs/phase2_r2_dinov2_vitb_mask2former'
+work_dir = './work_dirs/phase2_r2_dinov2_vitb_mask2former'
 
-crop_size = (384, 384)
+crop_size = (518, 518)
 data_preprocessor = dict(
     type='SegDataPreProcessor',
     mean=[0.157926 * 255, 0.157926 * 255, 0.157926 * 255],
@@ -41,7 +41,7 @@ model = dict(
         type='TIMMBackbone',
         model_name='vit_base_patch14_dinov2',
         pretrained=True,           # timm auto-downloads DINOv2 weights
-        img_size=384,              # DINOv2 default is 518; resize to our crop
+        img_size=518,              # DINOv2 default is 518; resize to our crop
         out_indices=(2, 5, 8, 11),  # tap 4 evenly-spaced transformer blocks
         features_only=True),
     neck=dict(
