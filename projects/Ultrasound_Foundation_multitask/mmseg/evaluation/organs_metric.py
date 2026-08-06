@@ -26,10 +26,74 @@ from skimage.segmentation import find_boundaries
 from scipy.ndimage import distance_transform_edt
 
 
-# Tasks that come from video data. Each frame in such a task is down-weighted so
-# one video contributes the same as one image instance (instance-level weighting
-# instead of frame-level, to avoid video tasks inflating micro metrics).
-_VIDEO_TASKS = ('ceus_cls', 'ceus_seg', 'video_seg')
+# CEUS frames are down-weighted so one video contributes the same as one image
+# instance. Cardiac video segmentation intentionally remains frame-weighted.
+_FRAME_WEIGHTED_TASKS = ('ceus_cls', 'ceus_seg')
+
+# Dataset supports used when combining per-dataset scores into task scores.
+_SECOND_SET_SUPPORT = {
+    'image_cls Appendix': 75,
+    'image_cls Breast': 176,
+    'image_cls Liver': 121,
+    'image_cls Prostate': 252,
+    'ceus_cls BreastCEUS': 41,
+    'ceus_cls LiverCEUS': 44,
+    'ceus_cls ProstateCEUS': 45,
+    'ceus_cls ThyroidCEUS': 40,
+    'image_seg Breast': 176,
+    'image_seg Breast_luminal': 256,
+    'image_seg Fetal_Head': 142,
+    'image_seg Heart': 90,
+    'image_seg Kidney': 79,
+    'image_seg Prostate': 251,
+    'image_seg Thyroid': 527,
+    'ceus_seg BreastCEUS': 205,
+    'ceus_seg LiverCEUS': 201,
+    'ceus_seg ProstateCEUS': 224,
+    'ceus_seg ThyroidCEUS': 199,
+    'video_seg CardiacCH': 690,
+}
+
+# The evaluation folders use training names, while second_set uses challenge
+# dataset names. The task is part of the key because one folder can provide
+# both classification and segmentation metrics.
+_SECOND_SET_DATASET_NAMES = {
+    ('image_cls', 'Appendix_US'): 'Appendix',
+    ('image_cls', 'Breast_US'): 'Breast',
+    ('image_cls', 'Liver_US'): 'Liver',
+    ('image_cls', 'Prostate_US'): 'Prostate',
+    ('ceus_cls', 'Breast_CEUS'): 'BreastCEUS',
+    ('ceus_cls', 'Liver_CEUS'): 'LiverCEUS',
+    ('ceus_cls', 'Prostate_CEUS'): 'ProstateCEUS',
+    ('ceus_cls', 'Thyroid_CEUS'): 'ThyroidCEUS',
+    ('image_seg', 'Breast_US'): 'Breast',
+    ('image_seg', 'BreastLuminal_US'): 'Breast_luminal',
+    ('image_seg', 'FetalHead_US'): 'Fetal_Head',
+    ('image_seg', 'Cardiac_US'): 'Heart',
+    ('image_seg', 'Kidney_US'): 'Kidney',
+    ('image_seg', 'Prostate_US'): 'Prostate',
+    ('image_seg', 'Thyroid_US'): 'Thyroid',
+    ('ceus_seg', 'Breast_CEUS'): 'BreastCEUS',
+    ('ceus_seg', 'Liver_CEUS'): 'LiverCEUS',
+    ('ceus_seg', 'Prostate_CEUS'): 'ProstateCEUS',
+    ('ceus_seg', 'Thyroid_CEUS'): 'ThyroidCEUS',
+    ('video_seg', 'Cardiac_Vids'): 'CardiacCH',
+}
+
+
+def _second_set_support(task: str, organ_folder: str) -> int:
+    """Return the configured second-set support for an evaluation folder."""
+    dataset_name = _SECOND_SET_DATASET_NAMES.get((task, organ_folder))
+    if dataset_name is None:
+        raise KeyError(
+            f'No second_set support configured for task={task!r}, '
+            f'organ_folder={organ_folder!r}')
+    support_key = f'{task} {dataset_name}'
+    try:
+        return _SECOND_SET_SUPPORT[support_key]
+    except KeyError as exc:
+        raise KeyError(
+            f'No second_set support configured for {support_key!r}') from exc
 
 
 def _task_of(organ_folder: str, is_seg: bool) -> Optional[str]:
@@ -46,11 +110,11 @@ def _task_of(organ_folder: str, is_seg: bool) -> Optional[str]:
 
 
 def _resolve_frame_weights(data_root: str) -> Dict[str, float]:
-    """{task: n_videos / n_frames} read from the per-folder val mappings.json.
+    """Return ``{task: n_videos / n_frames}`` for CEUS tasks.
 
-    Each video-task frame is weighted by 1/frames_per_video so the total weight
-    of one video equals one instance. Image tasks get weight 1.0 implicitly
-    (they are not present in this dict).
+    Each CEUS frame is weighted by ``1 / frames_per_video`` so the total weight
+    of one video equals one instance. Image tasks and ``video_seg`` get weight
+    1.0 implicitly because they are not present in this dict.
     """
     n_vid: Dict[str, int] = defaultdict(int)
     n_fr: Dict[str, int] = defaultdict(int)
@@ -69,7 +133,7 @@ def _resolve_frame_weights(data_root: str) -> Dict[str, float]:
             if not e.get('is_video'):
                 continue
             t = e.get('task')
-            if t is None:
+            if t not in _FRAME_WEIGHTED_TASKS:
                 continue
             vid = e.get('video_id')
             n_fr[t] += 1
@@ -134,8 +198,8 @@ class OrgansIoUMetric(BaseMetric):
         self.results_cls_acc = dict()
         self.results_cls_auc = dict()
         self.results_cls_w = dict()      # per-frame weight, parallel to cls_acc
-        # Per-task frame weight = n_videos / n_frames (instance-level weighting
-        # for video tasks). Resolved once from the val mapping.
+        # Per-task frame weight = n_videos / n_frames for CEUS tasks only.
+        # ``video_seg`` intentionally remains at the normal frame weight of 1.
         self.frame_weights = _resolve_frame_weights(data_root) if data_root else {}
         if self.frame_weights:
             print_log(
@@ -160,12 +224,14 @@ class OrgansIoUMetric(BaseMetric):
             pred_cls = data_sample['cls_logits']
             gt_cls = data_sample['gt_label'][0].to(pred_label.device)
             organ = data_sample['organ']
-            # Per-frame weight: video tasks get 1/frames_per_video so a whole
-            # video weighs as much as one image instance; image tasks -> 1.0.
+            # Only CEUS tasks use instance-level frame weighting. Image tasks and
+            # video_seg retain the normal per-sample weight of 1.0.
             cls_task = _task_of(organ, is_seg=False)
             seg_task = _task_of(organ, is_seg=True)
-            w_cls = self.frame_weights.get(cls_task, 1.0) if cls_task else 1.0
-            w_seg = self.frame_weights.get(seg_task, 1.0) if seg_task else 1.0
+            w_cls = (self.frame_weights.get(cls_task, 1.0)
+                     if cls_task in _FRAME_WEIGHTED_TASKS else 1.0)
+            w_seg = (self.frame_weights.get(seg_task, 1.0)
+                     if seg_task in _FRAME_WEIGHTED_TASKS else 1.0)
             if organ not in self.results_seg_iou:
                 self.results_seg_iou[organ] = []
                 self.results_seg_nsd[organ] = []
@@ -287,8 +353,7 @@ class OrgansIoUMetric(BaseMetric):
         """Weighted-micro version of compute_metrics.
 
         Each per-sample (intersect, union, pred_label, label) tuple is scaled by
-        its frame weight before summing, so one video contributes as much as one
-        image instance.
+        its task-specific frame weight before summing.
 
         NOTE: This produces pooled/micro versions of mIoU / mFscore (area-summed
         across all cases first, then divided). SEG_mDice is intentionally
@@ -481,13 +546,15 @@ class OrgansIoUMetric(BaseMetric):
         all batches.
 
         Reports per-organ metrics, an ``Overall_US`` micro-average across all
-        samples (frame-weighted for video tasks), per-task component metrics
+        samples (CEUS frame-weighted; video_seg frame-weighted normally),
+        per-task component metrics
         (``image_cls``, ``image_seg``, ``ceus_cls``, ``ceus_seg``,
         ``video_seg``), five ``Average/<task>`` scalars, and the
         ``Challenge/{Classification,Segmentation,Overall}`` composites which are
         macro-averaged across tasks so ceus/video are not drowned out by image
-        volume. Video-task frames are down-weighted to one instance per video
-        (``n_videos / n_frames`` from the val mapping).
+        volume. CEUS frames are down-weighted to one instance per video
+        (``n_videos / n_frames`` from the val mapping), while video_seg frames
+        retain weight 1.0.
 
         DSC (``SEG_mDice``) and NSD (``SEG_NSD``) are both computed per-case
         (per image/frame), then combined into each dataset's score as a
@@ -638,8 +705,8 @@ class OrgansIoUMetric(BaseMetric):
                     '/'.join((organ, k)): v
                     for k, v in _metrics.items()
                 }
-                # Record per-dataset instance counts so the task score can be a
-                # sample-weighted average of per-dataset composites.
+                # Record per-dataset instance counts for presence checks and
+                # diagnostics; task aggregation uses second-set supports.
                 if seg_n > 0:
                     _metrics[f'{organ}/_seg_n'] = seg_n
                 if cls_n > 0:
@@ -696,14 +763,16 @@ class OrgansIoUMetric(BaseMetric):
         - dataset score (cls)  = 0.5 * Accuracy + 0.5 * AUC
         - dataset score (seg)  = 0.7 * DSC + 0.3 * NSD, where DSC and NSD are
           each a support-weighted average of PER-CASE scores (not pooled areas)
-        - task score           = sample-weighted average of its datasets
+        - task score           = second-set-support-weighted average of its
+                                datasets
         - overall score        = equal-weighted average of the 5 task scores
 
         Each organ folder is one dataset. The per-folder component metrics
         (``<folder>/CLS_Acc``, ``<folder>/CLS_AUC``, ``<folder>/SEG_mDice``,
-        ``<folder>/SEG_NSD``) and the per-folder instance counts
+        ``<folder>/SEG_NSD``) and the per-folder weighted instance counts
         (``<folder>/_cls_n``, ``<folder>/_seg_n``) are already in ``metrics[0]``
-        from the evaluate loop.
+        from the evaluate loop. Task aggregation uses the hard-coded
+        ``_SECOND_SET_SUPPORT`` values instead of those instance counts.
         """
         m = metrics[0]
 
@@ -715,24 +784,31 @@ class OrgansIoUMetric(BaseMetric):
             # SEG_NSD is 0-1.
             return 0.7 * dice / 100.0 + 0.3 * nsd
 
-        # Map each organ folder to its task + per-folder composite + instance n.
-        task_folders = defaultdict(list)   # task -> [(score, n), ...]
+        # Map each organ folder to its task + per-folder composite + configured
+        # second-set support.
+        task_folders = defaultdict(list)   # task -> [(score, support), ...]
         for k in list(m.keys()):
             if not k.endswith('/_seg_n') and not k.endswith('/_cls_n'):
                 continue
             folder = k.rsplit('/', 1)[0]
+            if folder == 'Overall_US':
+                # This aggregate bucket ends in ``_US`` but is not a dataset.
+                m.pop(k)
+                continue
             is_seg = k.endswith('/_seg_n')
             t = _task_of(folder, is_seg=is_seg)
             if t is None:
                 continue
-            n = m.pop(k)                     # instance count for this dataset
-            if n <= 0:
+            actual_n = m.pop(k)              # weighted count for presence check
+            if actual_n <= 0:
                 continue
+            support = _second_set_support(t, folder)
             if is_seg:
                 d_k, ns_k = f'{folder}/SEG_mDice', f'{folder}/SEG_NSD'
                 if d_k in m and ns_k in m and not np.isnan(m[d_k]) \
                         and not np.isnan(m[ns_k]):
-                    task_folders[t].append((seg_comp(m[d_k], m[ns_k]), n))
+                    task_folders[t].append(
+                        (seg_comp(m[d_k], m[ns_k]), support))
             else:
                 a_k, au_k = f'{folder}/CLS_Acc', f'{folder}/CLS_AUC'
                 if a_k in m and not np.isnan(m[a_k]):
@@ -747,14 +823,15 @@ class OrgansIoUMetric(BaseMetric):
                             f'Acc={acc:.4f} as AUC fallback for task {t}.',
                             logger='current', level=logging.WARNING)
                         auc = acc
-                    task_folders[t].append((cls_comp(acc, auc), n))
+                    task_folders[t].append((cls_comp(acc, auc), support))
 
         task_scores: Dict[str, float] = {}
         for t, pairs in task_folders.items():
-            tot_n = sum(n for _, n in pairs)
-            if tot_n <= 0:
+            total_support = sum(support for _, support in pairs)
+            if total_support <= 0:
                 continue
-            task_scores[t] = sum(s * n for s, n in pairs) / tot_n
+            task_scores[t] = sum(s * support for s, support in pairs) \
+                / total_support
             m[f'Average/{t}'] = task_scores[t]
 
         # Diagnostics: cls/seg sub-means (NOT the overall — kept for logging).
