@@ -1,4 +1,4 @@
-_base_ = ['../phase2/r2_dinov2_vitb_mask2former.py']
+_base_ = ['../dino_mask2former/vit_small_dinov3.py']
 
 custom_imports = dict(
     imports=[
@@ -10,7 +10,7 @@ custom_imports = dict(
         'projects.Ultrasound_Foundation_multitask.mmseg.datasets.transforms',
     ])
 
-work_dir = './work_dirs/phase3_r2_dinov2_vitb_lora'
+work_dir = './work_dirs/dinov3_vit_small_mask2former_lora'
 
 model = dict(
     type='LoRAMultitaskEncoderDecoder',

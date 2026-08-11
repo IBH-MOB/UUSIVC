@@ -3,7 +3,7 @@ _base_ = [
     '../../../../configs/_base_/default_runtime.py',
 ]
 
-crop_size = (256, 256)
+crop_size = (518, 518)
 batch_size = 4
 # E6 dataset z-score normalization (grayscale ultrasound, replicated to 3ch)
 data_preprocessor = dict(

@@ -87,7 +87,8 @@ class MultitaskEncoderDecoder(BaseSegmentor):
                  test_cfg: OptConfigType = None,
                  data_preprocessor: OptConfigType = None,
                  pretrained: Optional[str] = None,
-                 init_cfg: OptMultiConfig = None):
+                 init_cfg: OptMultiConfig = None,
+                 seg_output=False):
         super().__init__(
             data_preprocessor=data_preprocessor, init_cfg=init_cfg)
         if pretrained is not None:
@@ -102,9 +103,10 @@ class MultitaskEncoderDecoder(BaseSegmentor):
         self._init_decode_head(decode_head)
         self._init_decode_cls_head(decode_cls_head)
         self._init_auxiliary_head(auxiliary_head)
-
+        self.decode_head_config = decode_head
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
+        self.seg_output = seg_output
 
         assert self.with_decode_head
 
@@ -150,15 +152,23 @@ class MultitaskEncoderDecoder(BaseSegmentor):
         """Encode images with backbone and decode into a semantic segmentation
         map of the same size as input."""
         x_seg_feat, x_cls_feat = self.extract_feat(inputs)
-        seg_logits = self.decode_head.predict(x_seg_feat, batch_img_metas,
+        if self.seg_output:
+            seg_logits, queries = self.decode_head.predict(x_seg_feat, batch_img_metas,
                                               self.test_cfg)
-        
+        else:
+            seg_logits = self.decode_head.predict(x_seg_feat, batch_img_metas,
+                                                            self.test_cfg)
+            
         batch_img_metas_samples = []
         for img in batch_img_metas:
             batch_img_metas_samples.append(DataSample(metainfo=img))
-        cls_logits = self.decode_cls_head.predict(x_cls_feat, batch_img_metas_samples,)
+
+        if self.seg_output:
+            cls_logits = self.decode_cls_head.predict(queries, batch_img_metas_samples,)
                                             #   self.test_cfg)
-                                              
+        else:
+            cls_logits = self.decode_cls_head.predict(x_cls_feat, batch_img_metas_samples,)
+                                            #   self.test_cfg)
 
         return seg_logits, cls_logits
 
@@ -171,13 +181,28 @@ class MultitaskEncoderDecoder(BaseSegmentor):
         losses = dict()
 
         if len(inputs[0]):
-            loss_decode = self.decode_head.loss(inputs[0], data_samples[0],
-                                            self.train_cfg)
-            losses.update(add_prefix(loss_decode, 'decode'))
+            if self.seg_output:
+                #queries place holder
+                loss_decode, queries = self.decode_head.loss(inputs[0], data_samples[0],
+                                                self.train_cfg)
+                losses.update(add_prefix(loss_decode, 'decode'))
+            else:
+                loss_decode = self.decode_head.loss(inputs[0], data_samples[0],
+                                                                self.train_cfg)
+                losses.update(add_prefix(loss_decode, 'decode'))
         if len(inputs[1]):
-            loss_decode_cls = self.decode_cls_head.loss(inputs[1],  data_samples[1],)
-                                            # train_cfg=self.train_cfg)
-            losses.update(add_prefix(loss_decode_cls, 'decode_cls'))
+            if self.seg_output:
+                # throwaway decode_head loss for cls_samples
+                _, queries = self.decode_head.loss(inputs[1], data_samples[1],
+                                                            self.train_cfg)
+                loss_decode_cls = self.decode_cls_head.loss(queries,  data_samples[1],)
+                                                # train_cfg=self.train_cfg)
+                losses.update(add_prefix(loss_decode_cls, 'decode_cls'))
+            else:
+                loss_decode_cls = self.decode_cls_head.loss(inputs[1],  data_samples[1],)
+                                                                # train_cfg=self.train_cfg)
+                losses.update(add_prefix(loss_decode_cls, 'decode_cls'))
+
         return losses
 
     def _auxiliary_head_forward_train(self, inputs: List[Tensor],

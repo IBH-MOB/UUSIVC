@@ -38,6 +38,7 @@ class Mask2FormerHead(MMDET_Mask2FormerHead):
                  num_classes,
                  align_corners=False,
                  ignore_index=255,
+                 return_queries=False,
                  **kwargs):
         super().__init__(**kwargs)
 
@@ -45,6 +46,7 @@ class Mask2FormerHead(MMDET_Mask2FormerHead):
         self.align_corners = align_corners
         self.out_channels = num_classes
         self.ignore_index = ignore_index
+        self.return_queries = return_queries
 
         feat_channels = kwargs['feat_channels']
         self.cls_embed = nn.Linear(feat_channels, self.num_classes + 1)
@@ -120,14 +122,18 @@ class Mask2FormerHead(MMDET_Mask2FormerHead):
             batch_data_samples)
 
         # forward
-        all_cls_scores, all_mask_preds = self(x, batch_data_samples)
+        all_cls_scores, all_mask_preds, all_queries = self(x, batch_data_samples)
 
         # loss
         losses = self.loss_by_feat(all_cls_scores, all_mask_preds,
                                    batch_gt_instances, batch_img_metas)
 
-        return losses
-
+        if self.return_queries:
+            # return the last layer queries to be fed to the cls_head 
+            return losses, all_queries
+        else:
+            return losses
+    
     def predict(self, x: Tuple[Tensor], batch_img_metas: List[dict],
                 test_cfg: ConfigType) -> Tuple[Tensor]:
         """Test without augmentaton.
@@ -147,7 +153,7 @@ class Mask2FormerHead(MMDET_Mask2FormerHead):
             SegDataSample(metainfo=metainfo) for metainfo in batch_img_metas
         ]
 
-        all_cls_scores, all_mask_preds = self(x, batch_data_samples)
+        all_cls_scores, all_mask_preds, all_queries = self(x, batch_data_samples)
         mask_cls_results = all_cls_scores[-1]
         mask_pred_results = all_mask_preds[-1]
         if 'pad_shape' in batch_img_metas[0]:
@@ -160,4 +166,9 @@ class Mask2FormerHead(MMDET_Mask2FormerHead):
         cls_score = F.softmax(mask_cls_results, dim=-1)[..., :-1]
         mask_pred = mask_pred_results.sigmoid()
         seg_logits = torch.einsum('bqc, bqhw->bchw', cls_score, mask_pred)
+
+        if self.return_queries:
+            # return the last layer queries to be fed to the cls_head 
+            return seg_logits, all_queries
+
         return seg_logits

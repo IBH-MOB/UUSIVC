@@ -1,5 +1,6 @@
 _base_ = ['./_base_dino.py']
 
+
 custom_imports = dict(
     imports=[
         'projects.Ultrasound_Foundation_multitask.mmseg.datasets.uusivc',
@@ -9,9 +10,9 @@ custom_imports = dict(
         'projects.Ultrasound_Foundation_multitask.mmseg.datasets.transforms',
     ])
 
-work_dir = './work_dirs/dinov3_vit_base_mask2former_b4'
+work_dir = './work_dirs/dinov2_vit_base_mask2former_b4'
 
-crop_size = (256, 256)
+crop_size = (518, 518)
 data_preprocessor = dict(
     type='SegDataPreProcessor',
     mean=[0.157926 * 255, 0.157926 * 255, 0.157926 * 255],
@@ -26,9 +27,9 @@ model = dict(
     data_preprocessor=data_preprocessor,
     backbone=dict(
         type='TIMMBackbone',
-        model_name='vit_base_patch16_dinov3',
-        pretrained=True,           # timm auto-downloads DINOv3 weights
-        img_size=256,              
+        model_name='vit_base_patch14_dinov2',
+        pretrained=True,           # timm auto-downloads DINOv2 weights
+        img_size=518,              # DINOv2 default is 518; resize to our crop
         out_indices=(2, 5, 8, 11),  # tap 4 evenly-spaced transformer blocks
         features_only=True),
     neck=dict(

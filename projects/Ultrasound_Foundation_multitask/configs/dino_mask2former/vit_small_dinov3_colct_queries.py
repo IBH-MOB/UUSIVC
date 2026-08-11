@@ -5,11 +5,11 @@ custom_imports = dict(
         'projects.Ultrasound_Foundation_multitask.mmseg.datasets.uusivc',
         'projects.Ultrasound_Foundation_multitask.mmseg.evaluation.organs_metric',
         'projects.Ultrasound_Foundation_multitask.mmseg.models.multitask_encoder_decoder',
-        'projects.Ultrasound_Foundation_multitask.mmseg.models.cls_head',
+        'projects.Ultrasound_Foundation_multitask.mmseg.models.cls_head_m2f',
         'projects.Ultrasound_Foundation_multitask.mmseg.datasets.transforms',
     ])
 
-work_dir = './work_dirs/dinov3_vit_base_mask2former_b4'
+work_dir = './work_dirs/vit_small_mask2former_b16_colct_query'
 
 crop_size = (256, 256)
 data_preprocessor = dict(
@@ -24,21 +24,23 @@ optimizer = dict(type='AdamW', lr=0.0001, weight_decay=0.05, eps=1e-8,
 model = dict(
     type='MultitaskEncoderDecoder',
     data_preprocessor=data_preprocessor,
+    seg_output=True,  # set to True to output segmentation masks
     backbone=dict(
         type='TIMMBackbone',
-        model_name='vit_base_patch16_dinov3',
+        model_name='vit_small_patch16_dinov3',
         pretrained=True,           # timm auto-downloads DINOv3 weights
         img_size=256,              
         out_indices=(2, 5, 8, 11),  # tap 4 evenly-spaced transformer blocks
         features_only=True),
     neck=dict(
         type='Feature2Pyramid',
-        embed_dim=768,
+        embed_dim=384,
         rescales=[4, 2, 1, 0.5],
         norm_cfg=dict(type='SyncBN', requires_grad=True)),
     decode_head=dict(
         type='Mask2FormerHead',
-        in_channels=[768, 768, 768, 768],   # Feature2Pyramid output (embed_dim)
+        return_queries=True,  # return queries for cls_head
+        in_channels=[384, 384, 384, 384],   # Feature2Pyramid output (embed_dim)
         strides=[4, 8, 16, 32],
         feat_channels=256,
         out_channels=256,
@@ -105,11 +107,10 @@ model = dict(
                          eps=1.0)]),
             sampler=dict(type='mmdet.MaskPseudoSampler'))),
     decode_cls_head=dict(
-        type='CLSHead',
-        in_channels=768,           # Feature2Pyramid deepest output
-        in_index=3,
+        type='CLSHeadM2F',
+        in_channels=256,           # Feature2Pyramid deepest output
         channels=512,
-        num_convs=1,
+        num_layers=1,
         concat_input=False,
         dropout_ratio=0.1,
         num_classes=2,
@@ -119,7 +120,7 @@ model = dict(
                          loss_weight=1.0)),
     auxiliary_head=dict(
         type='FCNHead',
-        in_channels=768,           # Feature2Pyramid deepest output
+        in_channels=384,           # Feature2Pyramid deepest output
         in_index=3,
         channels=256,
         num_convs=1,
