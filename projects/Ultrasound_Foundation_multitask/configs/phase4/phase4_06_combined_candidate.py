@@ -30,9 +30,9 @@ aspect_train_pipeline = [
 
 aspect_test_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='LoadAnnotations'),
     dict(type='Resize', scale=crop_size, keep_ratio=True),
     dict(type='Pad', size=crop_size, pad_val=dict(img=0, seg=255)),
+    dict(type='LoadAnnotations'),
     dict(type='PackSegClsInputs'),
 ]
 

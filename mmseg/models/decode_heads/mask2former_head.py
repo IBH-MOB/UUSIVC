@@ -157,9 +157,9 @@ class Mask2FormerHead(MMDET_Mask2FormerHead):
         mask_cls_results = all_cls_scores[-1]
         mask_pred_results = all_mask_preds[-1]
         if 'pad_shape' in batch_img_metas[0]:
-            size = batch_img_metas[0]['pad_shape']
+            size = batch_img_metas[0]['pad_shape'][:2]
         else:
-            size = batch_img_metas[0]['img_shape']
+            size = batch_img_metas[0]['img_shape'][:2]
         # upsample mask
         mask_pred_results = F.interpolate(
             mask_pred_results, size=size, mode='bilinear', align_corners=False)
