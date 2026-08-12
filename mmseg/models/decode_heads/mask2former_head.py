@@ -39,6 +39,7 @@ class Mask2FormerHead(MMDET_Mask2FormerHead):
                  align_corners=False,
                  ignore_index=255,
                  return_queries=False,
+                 return_seg=False,
                  **kwargs):
         super().__init__(**kwargs)
 
@@ -47,6 +48,7 @@ class Mask2FormerHead(MMDET_Mask2FormerHead):
         self.out_channels = num_classes
         self.ignore_index = ignore_index
         self.return_queries = return_queries
+        self.return_seg = return_seg
 
         feat_channels = kwargs['feat_channels']
         self.cls_embed = nn.Linear(feat_channels, self.num_classes + 1)
@@ -121,9 +123,11 @@ class Mask2FormerHead(MMDET_Mask2FormerHead):
         batch_gt_instances, batch_img_metas = self._seg_data_to_instance_data(
             batch_data_samples)
 
-        # forward
-        all_cls_scores, all_mask_preds, all_queries = self(x, batch_data_samples)
-
+        if self.return_seg:
+            # forward
+            all_cls_scores, all_mask_preds, all_queries = self(x, batch_data_samples)
+        else:
+            all_cls_scores, all_mask_preds = self(x, batch_data_samples)
         # loss
         losses = self.loss_by_feat(all_cls_scores, all_mask_preds,
                                    batch_gt_instances, batch_img_metas)
@@ -153,7 +157,10 @@ class Mask2FormerHead(MMDET_Mask2FormerHead):
             SegDataSample(metainfo=metainfo) for metainfo in batch_img_metas
         ]
 
-        all_cls_scores, all_mask_preds, all_queries = self(x, batch_data_samples)
+        if self.return_seg:
+            all_cls_scores, all_mask_preds, all_queries = self(x, batch_data_samples)
+        else:
+            all_cls_scores, all_mask_preds = self(x, batch_data_samples)
         mask_cls_results = all_cls_scores[-1]
         mask_pred_results = all_mask_preds[-1]
         if 'pad_shape' in batch_img_metas[0]:
